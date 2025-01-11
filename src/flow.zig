@@ -48,6 +48,8 @@ pub const Flow = struct {
     mode: TextMode,
     cursor_blink_ns: u64,
     previous_draw: u64,
+    // NOTE: Needed to outlive the flush call
+    cursor_pos_buffer: []u8,
 
     pub fn init(allocator: std.mem.Allocator) !Flow {
         return .{
@@ -61,6 +63,7 @@ pub const Flow = struct {
             .mode = TextMode.NORMAL,
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
+            .cursor_pos_buffer = undefined,
         };
     }
 
@@ -117,11 +120,12 @@ pub const Flow = struct {
             // Render the application to the screen
             try self.vx.render(buffered.writer().any());
             try buffered.flush();
+            self.allocator.free(self.cursor_pos_buffer);
         }
     }
 
     fn handleModeNormal(self: *Flow, key: vaxis.Key) !void {
-        if (key.matches(':', .{ .shift = true })) {
+        if (key.matches(';', .{})) {
             self.mode = TextMode.COMMAND;
             return;
         }
@@ -151,17 +155,56 @@ pub const Flow = struct {
         }
     }
 
-    // fn writeCharAtPos(self: *Flow, char: u8, col: usize, row: usize) !void {
-    //     const row_start = row % self.vx.screen.width;
-    // }
+    fn writeCharAtPos(self: *Flow, char: u8, col: usize, row: usize) void {
+        const last_pos = ((row + 1) * self.vx.screen.width) - 1;
+        const last_row_char: u8 = self.buffer[last_pos];
+        if (last_row_char != 0 and last_row_char != vaxis.Key.space and last_row_char != vaxis.Key.tab) {
+            // Non-printable characters
+            return;
+        }
+        const pos = (row * self.vx.screen.width) + col;
+        std.mem.copyBackwards(u8, self.buffer[pos + 1 ..], self.buffer[pos .. last_pos - 1]);
+        self.buffer[pos] = char;
+    }
+
+    fn deleteCharAtPos(self: *Flow, col: usize, row: usize) void {
+        const last_pos = ((row + 1) * self.vx.screen.width) - 1;
+        const pos = (row * self.vx.screen.width) + col;
+        std.mem.copyForwards(u8, self.buffer[pos..], self.buffer[pos + 1 .. last_pos]);
+        self.buffer[last_pos] = 0;
+    }
 
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
+        // NOTE: Emulates labelled switch with continue until zig 0.14.0 releases
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
-            0x20...0x7E => if (self.buffer_init) {
-                self.buffer[(self.vx.screen.cursor_row * self.vx.screen.width) + self.vx.screen.cursor_col] = @intCast(key.codepoint);
+            vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF => if (self.buffer_init) {
+                self.writeCharAtPos(@intCast(key.codepoint), self.vx.screen.cursor_col, self.vx.screen.cursor_row);
             },
-            else => return,
+            vaxis.Key.delete, vaxis.Key.backspace => if (self.buffer_init) {
+                self.deleteCharAtPos(self.vx.screen.cursor_col, self.vx.screen.cursor_row);
+            },
+            vaxis.Key.left => {
+                if (self.vx.screen.cursor_col > 0) {
+                    self.vx.screen.cursor_col -= 1;
+                }
+            },
+            vaxis.Key.down => {
+                if (self.vx.screen.cursor_row < self.vx.screen.height - 2) {
+                    self.vx.screen.cursor_row += 1;
+                }
+            },
+            vaxis.Key.up => {
+                if (self.vx.screen.cursor_row > 0) {
+                    self.vx.screen.cursor_row -= 1;
+                }
+            },
+            vaxis.Key.right => {
+                if (self.vx.screen.cursor_col < self.vx.screen.width - 1) {
+                    self.vx.screen.cursor_col += 1;
+                }
+            },
+            else => {},
         }
     }
 
@@ -171,6 +214,7 @@ pub const Flow = struct {
 
     fn handleModeCommand(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
+            vaxis.Key.escape => self.mode = TextMode.NORMAL,
             'q' => self.should_quit = true,
             else => return,
         }
@@ -189,9 +233,9 @@ pub const Flow = struct {
             .winsize => |ws| {
                 try self.vx.resize(self.allocator, self.tty.anyWriter(), ws);
                 if (self.buffer_init) {
-                    _ = self.allocator.resize(self.buffer, ws.cols * ws.rows);
+                    _ = self.allocator.resize(self.buffer, ws.cols * (ws.rows - 1));
                 } else {
-                    self.buffer = try self.allocator.alloc(u8, ws.cols * ws.rows);
+                    self.buffer = try self.allocator.alloc(u8, ws.cols * (ws.rows - 1));
                     @memset(self.buffer, 0);
                     std.mem.copyForwards(u8, self.buffer, "Hello world!");
                     self.buffer_init = true;
@@ -226,17 +270,15 @@ pub const Flow = struct {
             });
             _ = try child.printSegment(.{ .text = self.buffer[(i * win.height)..((i + 1) * win.height)], .style = .{} }, .{});
         }
-        // const status = try std.fmt.allocPrint(self.allocator, "{}:{}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
-        // defer self.allocator.free(status);
-        // const status_bar = win.child(.{
-        //     .x_off = win.width - 7 - 1,
-        //     .y_off = win.height - 1,
-        //     .width = .{ .limit = 7 },
-        //     .height = .{ .limit = 1 },
-        // });
-        // _ = try status_bar.printSegment(.{ .text = status, .style = .{} }, .{});
+        self.cursor_pos_buffer = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
+        const status_bar = win.child(.{
+            .x_off = win.width - self.cursor_pos_buffer.len - 1,
+            .y_off = win.height - 1,
+            .width = .{ .limit = self.cursor_pos_buffer.len },
+            .height = .{ .limit = 1 },
+        });
+        _ = try status_bar.printSegment(.{ .text = self.cursor_pos_buffer, .style = .{} }, .{});
 
-        const cursor_blink = nanotime() - self.previous_draw > self.cursor_blink_ns;
         const cursor = win.child(.{
             .x_off = self.vx.screen.cursor_col,
             .y_off = self.vx.screen.cursor_row,
@@ -247,17 +289,16 @@ pub const Flow = struct {
                 .limit = 1,
             },
         });
-        var style: vaxis.Style = undefined;
-        if (cursor_blink) {
-            style = vaxis.Style{
-                .reverse = true,
-            };
-            // style = vaxis.Style{ .bg = colours.WHITE, .fg = colours.BLACK };
-        } else {
-            style = .{ .bg = .default, .fg = .default };
-        }
+        const style: vaxis.Style = vaxis.Style{
+            .reverse = true,
+        };
         const cursor_index = (self.vx.screen.cursor_row * win.width) + self.vx.screen.cursor_col;
-        _ = try cursor.printSegment(.{ .text = self.buffer[cursor_index .. cursor_index + 1], .style = style }, .{});
+        var cursor_value: []u8 = self.buffer[cursor_index .. cursor_index + 1];
+        if (cursor_value[0] == 0) {
+            // Need a printable character to change the style colours for some reason
+            cursor_value[0] = ' ';
+        }
+        _ = try cursor.printSegment(.{ .text = cursor_value, .style = style }, .{});
 
         const mode_string = switch (self.mode) {
             TextMode.NORMAL => " NORMAL ",
@@ -272,27 +313,5 @@ pub const Flow = struct {
             .height = .{ .limit = 1 },
         });
         _ = try text_mode.printSegment(.{ .text = mode_string, .style = .{ .bg = self.mode.toColor() } }, .{});
-
-        // const child = win.child(.{
-        //     .x_off = 0,
-        //     .y_off = win.height - 1,
-        //     .width = .{ .limit = msg.len },
-        //     .height = .{ .limit = 1 },
-        // });
-        //
-        // // mouse events are much easier to handle in the draw cycle. Windows have a helper method to
-        // // determine if the event occurred in the target window. This method returns null if there
-        // // is no mouse event, or if it occurred outside of the window
-        // const style: vaxis.Style = if (child.hasMouse(self.mouse)) |_| blk: {
-        //     // We handled the mouse event, so set it to null
-        //     self.mouse = null;
-        //     self.vx.setMouseShape(.pointer);
-        //     break :blk .{ .reverse = true };
-        // } else .{};
-        //
-        // // Print a text segment to the screen. This is a helper function which iterates over the
-        // // text field for graphemes. Alternatively, you can implement your own print functions and
-        // // use the writeCell API.
-        // _ = try child.printSegment(.{ .text = msg, .style = style }, .{});
     }
 };

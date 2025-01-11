@@ -1,6 +1,7 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
 const Event = @import("event.zig").Event;
+const nanotime = @import("timer.zig").nanotime;
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
 /// panics occur
@@ -18,12 +19,14 @@ pub const TextMode = enum(u2) {
     NORMAL = 0,
     INSERT = 1,
     VISUAL = 2,
+    COMMAND = 3,
 
     pub fn toColor(self: TextMode) vaxis.Color {
         return switch (self) {
             TextMode.NORMAL => vaxis.Color{ .rgb = .{ 0xFF, 0x00, 0x00 } },
             TextMode.INSERT => vaxis.Color{ .rgb = .{ 0x00, 0xFF, 0x00 } },
             TextMode.VISUAL => vaxis.Color{ .rgb = .{ 0x00, 0x00, 0xFF } },
+            TextMode.COMMAND => vaxis.Color{ .rgb = .{ 0x00, 0xFF, 0xFF } },
         };
     }
 };
@@ -42,6 +45,8 @@ pub const Flow = struct {
     buffer: []u8,
     buffer_init: bool,
     mode: TextMode,
+    cursor_blink_ns: u64,
+    previous_draw: u64,
 
     pub fn init(allocator: std.mem.Allocator) !Flow {
         return .{
@@ -53,6 +58,8 @@ pub const Flow = struct {
             .buffer = undefined,
             .buffer_init = false,
             .mode = TextMode.NORMAL,
+            .cursor_blink_ns = 2 * std.time.ns_per_ms,
+            .previous_draw = 0,
         };
     }
 
@@ -83,7 +90,7 @@ pub const Flow = struct {
         // call it after entering the alt screen if you are a full screen application. The second
         // arg is a timeout for the terminal to send responses. Typically the response will be very
         // fast, however it could be slow on ssh connections.
-        try self.vx.queryTerminal(self.tty.anyWriter(), 1 * std.time.ns_per_s);
+        try self.vx.queryTerminal(self.tty.anyWriter(), 5 * std.time.ns_per_s);
 
         // Enable mouse events
         try self.vx.setMouseMode(self.tty.anyWriter(), true);
@@ -101,6 +108,7 @@ pub const Flow = struct {
             }
             // Draw our application after handling events
             try self.draw();
+            self.previous_draw = nanotime();
 
             // It's best to use a buffered writer for the render method. TTY provides one, but you
             // may use your own. The provided bufferedWriter has a buffer size of 4096
@@ -112,8 +120,8 @@ pub const Flow = struct {
     }
 
     fn handleModeNormal(self: *Flow, key: vaxis.Key) !void {
-        if (key.matches('c', .{ .ctrl = true })) {
-            self.should_quit = true;
+        if (key.matches(':', .{ .shift = true })) {
+            self.mode = TextMode.COMMAND;
             return;
         }
         switch (key.codepoint) {
@@ -160,6 +168,13 @@ pub const Flow = struct {
         // TODO: Implement this
     }
 
+    fn handleModeCommand(self: *Flow, key: vaxis.Key) !void {
+        switch (key.codepoint) {
+            'q' => self.should_quit = true,
+            else => return,
+        }
+    }
+
     /// Update our application state from an event
     pub fn update(self: *Flow, event: Event) !void {
         switch (event) {
@@ -167,6 +182,7 @@ pub const Flow = struct {
                 .NORMAL => self.handleModeNormal(key),
                 .INSERT => self.handleModeInsert(key),
                 .VISUAL => self.handleModeVisual(key),
+                .COMMAND => self.handleModeCommand(key),
             },
             .mouse => |mouse| self.mouse = mouse,
             .winsize => |ws| {
@@ -220,15 +236,33 @@ pub const Flow = struct {
         // });
         // _ = try status_bar.printSegment(.{ .text = status, .style = .{} }, .{});
 
+        const cursor_blink = nanotime() - self.previous_draw > self.cursor_blink_ns;
+        const cursor = win.child(.{
+            .x_off = self.vx.screen.cursor_col,
+            .y_off = self.vx.screen.cursor_row,
+            .width = .{
+                .limit = 1,
+            },
+            .height = .{
+                .limit = 1,
+            },
+        });
+        var style = vaxis.Style{ .bg = .default };
+        if (cursor_blink) {
+            style.bg = vaxis.Color{ .rgb = .{ 0xFF, 0xFF, 0xFF } };
+        }
+        _ = try cursor.printSegment(.{ .text = " ", .style = style }, .{});
+
         const mode_string = switch (self.mode) {
-            TextMode.NORMAL => "NORMAL",
-            TextMode.INSERT => "INSERT",
-            TextMode.VISUAL => "VISUAL",
+            TextMode.NORMAL => " NORMAL ",
+            TextMode.INSERT => " INSERT ",
+            TextMode.VISUAL => " VISUAL ",
+            TextMode.COMMAND => " COMMAND ",
         };
         const text_mode = win.child(.{
             .x_off = 0,
             .y_off = win.height - 1,
-            .width = .{ .limit = 6 },
+            .width = .{ .limit = 9 },
             .height = .{ .limit = 1 },
         });
         _ = try text_mode.printSegment(.{ .text = mode_string, .style = .{ .bg = self.mode.toColor() } }, .{});

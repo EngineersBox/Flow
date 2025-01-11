@@ -14,6 +14,20 @@ pub const std_options: std.Options = .{
     },
 };
 
+pub const TextMode = enum(u2) {
+    NORMAL = 0,
+    INSERT = 1,
+    VISUAL = 2,
+
+    pub fn toColor(self: TextMode) vaxis.Color {
+        return switch (self) {
+            TextMode.NORMAL => vaxis.Color{ .rgb = .{ 0xFF, 0x00, 0x00 } },
+            TextMode.INSERT => vaxis.Color{ .rgb = .{ 0x00, 0xFF, 0x00 } },
+            TextMode.VISUAL => vaxis.Color{ .rgb = .{ 0x00, 0x00, 0xFF } },
+        };
+    }
+};
+
 /// The application state
 pub const Flow = struct {
     allocator: std.mem.Allocator,
@@ -25,6 +39,9 @@ pub const Flow = struct {
     vx: vaxis.Vaxis,
     /// A mouse event that we will handle in the draw cycle
     mouse: ?vaxis.Mouse,
+    buffer: []u8,
+    buffer_init: bool,
+    mode: TextMode,
 
     pub fn init(allocator: std.mem.Allocator) !Flow {
         return .{
@@ -33,6 +50,9 @@ pub const Flow = struct {
             .tty = try vaxis.Tty.init(),
             .vx = try vaxis.init(allocator, .{}),
             .mouse = null,
+            .buffer = undefined,
+            .buffer_init = false,
+            .mode = TextMode.NORMAL,
         };
     }
 
@@ -42,6 +62,7 @@ pub const Flow = struct {
         // memory
         self.vx.deinit(self.allocator, self.tty.anyWriter());
         self.tty.deinit();
+        self.allocator.free(self.buffer);
     }
 
     pub fn run(self: *Flow) !void {
@@ -79,7 +100,7 @@ pub const Flow = struct {
                 try self.update(event);
             }
             // Draw our application after handling events
-            self.draw();
+            try self.draw();
 
             // It's best to use a buffered writer for the render method. TTY provides one, but you
             // may use your own. The provided bufferedWriter has a buffer size of 4096
@@ -90,25 +111,83 @@ pub const Flow = struct {
         }
     }
 
+    fn handleModeNormal(self: *Flow, key: vaxis.Key) !void {
+        if (key.matches('c', .{ .ctrl = true })) {
+            self.should_quit = true;
+            return;
+        }
+        switch (key.codepoint) {
+            'i' => self.mode = TextMode.INSERT,
+            'h', vaxis.Key.left => {
+                if (self.vx.screen.cursor_col > 0) {
+                    self.vx.screen.cursor_col -= 1;
+                }
+            },
+            'j', vaxis.Key.down => {
+                if (self.vx.screen.cursor_row < self.vx.screen.height - 2) {
+                    self.vx.screen.cursor_row += 1;
+                }
+            },
+            'k', vaxis.Key.up => {
+                if (self.vx.screen.cursor_row > 0) {
+                    self.vx.screen.cursor_row -= 1;
+                }
+            },
+            'l', vaxis.Key.right => {
+                if (self.vx.screen.cursor_col < self.vx.screen.width - 1) {
+                    self.vx.screen.cursor_col += 1;
+                }
+            },
+            else => return,
+        }
+    }
+
+    // fn writeCharAtPos(self: *Flow, char: u8, col: usize, row: usize) !void {
+    //     const row_start = row % self.vx.screen.width;
+    // }
+
+    fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
+        switch (key.codepoint) {
+            vaxis.Key.escape => self.mode = TextMode.NORMAL,
+            0x20...0x7E => if (self.buffer_init) {
+                self.buffer[(self.vx.screen.cursor_row * self.vx.screen.width) + self.vx.screen.cursor_col] = @intCast(key.codepoint);
+            },
+            else => return,
+        }
+    }
+
+    fn handleModeVisual(_: *Flow, _: vaxis.Key) !void {
+        // TODO: Implement this
+    }
+
     /// Update our application state from an event
     pub fn update(self: *Flow, event: Event) !void {
         switch (event) {
-            .key_press => |key| {
-                // key.matches does some basic matching algorithms. Key matching can be complex in
-                // the presence of kitty keyboard encodings, this will generally be a good approach.
-                // There are other matching functions available for specific purposes, as well
-                if (key.matches('c', .{ .ctrl = true }))
-                    self.should_quit = true;
+            .key_press => |key| try switch (self.mode) {
+                .NORMAL => self.handleModeNormal(key),
+                .INSERT => self.handleModeInsert(key),
+                .VISUAL => self.handleModeVisual(key),
             },
             .mouse => |mouse| self.mouse = mouse,
-            .winsize => |ws| try self.vx.resize(self.allocator, self.tty.anyWriter(), ws),
+            .winsize => |ws| {
+                try self.vx.resize(self.allocator, self.tty.anyWriter(), ws);
+                if (self.buffer_init) {
+                    _ = self.allocator.resize(self.buffer, ws.cols * ws.rows);
+                } else {
+                    std.log.info("H: {} W: {}", .{ ws.cols, ws.rows });
+                    self.buffer = try self.allocator.alloc(u8, ws.cols * ws.rows);
+                    @memset(self.buffer, 0);
+                    std.mem.copyForwards(u8, self.buffer, "Hello world!");
+                    self.buffer_init = true;
+                }
+            },
             else => {},
         }
     }
 
     /// Draw our current state
-    pub fn draw(self: *Flow) void {
-        const msg = "Hello, world!";
+    pub fn draw(self: *Flow) !void {
+        // const msg = "Hello, world!";
 
         // Window is a bounded area with a view to the screen. You cannot draw outside of a windows
         // bounds. They are light structures, not intended to be stored.
@@ -122,27 +201,58 @@ pub const Flow = struct {
         // In addition to clearing our window, we want to clear the mouse shape state since we may
         // be changing that as well
         self.vx.setMouseShape(.default);
+        for (0..win.height - 1) |i| {
+            const child = win.child(.{
+                .x_off = 0,
+                .y_off = i,
+                .width = .{ .limit = win.width },
+                .height = .{ .limit = 1 },
+            });
+            _ = try child.printSegment(.{ .text = self.buffer[(i * win.height)..((i + 1) * win.height)], .style = .{} }, .{});
+        }
+        // const status = try std.fmt.allocPrint(self.allocator, "{}:{}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
+        // defer self.allocator.free(status);
+        // const status_bar = win.child(.{
+        //     .x_off = win.width - 7 - 1,
+        //     .y_off = win.height - 1,
+        //     .width = .{ .limit = 7 },
+        //     .height = .{ .limit = 1 },
+        // });
+        // _ = try status_bar.printSegment(.{ .text = status, .style = .{} }, .{});
 
-        const child = win.child(.{
-            .x_off = (win.width / 2) - 7,
-            .y_off = win.height / 2 + 1,
-            .width = .{ .limit = msg.len },
+        const mode_string = switch (self.mode) {
+            TextMode.NORMAL => "NORMAL",
+            TextMode.INSERT => "INSERT",
+            TextMode.VISUAL => "VISUAL",
+        };
+        const text_mode = win.child(.{
+            .x_off = 0,
+            .y_off = win.height - 1,
+            .width = .{ .limit = 6 },
             .height = .{ .limit = 1 },
         });
+        _ = try text_mode.printSegment(.{ .text = mode_string, .style = .{ .bg = self.mode.toColor() } }, .{});
 
-        // mouse events are much easier to handle in the draw cycle. Windows have a helper method to
-        // determine if the event occurred in the target window. This method returns null if there
-        // is no mouse event, or if it occurred outside of the window
-        const style: vaxis.Style = if (child.hasMouse(self.mouse)) |_| blk: {
-            // We handled the mouse event, so set it to null
-            self.mouse = null;
-            self.vx.setMouseShape(.pointer);
-            break :blk .{ .reverse = true };
-        } else .{};
-
-        // Print a text segment to the screen. This is a helper function which iterates over the
-        // text field for graphemes. Alternatively, you can implement your own print functions and
-        // use the writeCell API.
-        _ = try child.printSegment(.{ .text = msg, .style = style }, .{});
+        // const child = win.child(.{
+        //     .x_off = 0,
+        //     .y_off = win.height - 1,
+        //     .width = .{ .limit = msg.len },
+        //     .height = .{ .limit = 1 },
+        // });
+        //
+        // // mouse events are much easier to handle in the draw cycle. Windows have a helper method to
+        // // determine if the event occurred in the target window. This method returns null if there
+        // // is no mouse event, or if it occurred outside of the window
+        // const style: vaxis.Style = if (child.hasMouse(self.mouse)) |_| blk: {
+        //     // We handled the mouse event, so set it to null
+        //     self.mouse = null;
+        //     self.vx.setMouseShape(.pointer);
+        //     break :blk .{ .reverse = true };
+        // } else .{};
+        //
+        // // Print a text segment to the screen. This is a helper function which iterates over the
+        // // text field for graphemes. Alternatively, you can implement your own print functions and
+        // // use the writeCell API.
+        // _ = try child.printSegment(.{ .text = msg, .style = style }, .{});
     }
 };

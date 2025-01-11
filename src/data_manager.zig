@@ -3,7 +3,7 @@
 const std = @import("std");
 
 pub const Page: type = struct {
-    buffer: []u8,
+    buffer: []align(std.mem.page_size) u8,
     number_of_pages: u32,
     page: u64,
 };

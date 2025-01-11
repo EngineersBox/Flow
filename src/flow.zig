@@ -165,13 +165,20 @@ pub const Flow = struct {
         const pos = (row * self.vx.screen.width) + col;
         std.mem.copyBackwards(u8, self.buffer[pos + 1 ..], self.buffer[pos .. last_pos - 1]);
         self.buffer[pos] = char;
+        self.vx.screen.cursor_col += 1;
     }
 
-    fn deleteCharAtPos(self: *Flow, col: usize, row: usize) void {
+    fn deleteCharAtPos(self: *Flow, remove_ahead: bool, col: usize, row: usize) void {
         const last_pos = ((row + 1) * self.vx.screen.width) - 1;
         const pos = (row * self.vx.screen.width) + col;
-        std.mem.copyForwards(u8, self.buffer[pos..], self.buffer[pos + 1 .. last_pos]);
-        self.buffer[last_pos] = 0;
+        if (remove_ahead and pos != last_pos) {
+            std.mem.copyForwards(u8, self.buffer[pos..], self.buffer[pos + 1 .. last_pos]);
+            self.buffer[last_pos] = 0;
+        } else if (!remove_ahead and pos != 0) {
+            std.mem.copyForwards(u8, self.buffer[pos - 1 ..], self.buffer[pos..last_pos]);
+            self.buffer[last_pos] = 0;
+            self.vx.screen.cursor_col -= 1;
+        }
     }
 
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
@@ -182,7 +189,7 @@ pub const Flow = struct {
                 self.writeCharAtPos(@intCast(key.codepoint), self.vx.screen.cursor_col, self.vx.screen.cursor_row);
             },
             vaxis.Key.delete, vaxis.Key.backspace => if (self.buffer_init) {
-                self.deleteCharAtPos(self.vx.screen.cursor_col, self.vx.screen.cursor_row);
+                self.deleteCharAtPos(key.codepoint == vaxis.Key.delete, self.vx.screen.cursor_col, self.vx.screen.cursor_row);
             },
             vaxis.Key.left => {
                 if (self.vx.screen.cursor_col > 0) {

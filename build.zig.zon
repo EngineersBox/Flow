@@ -51,6 +51,10 @@
         //    // actually used.
         //    .lazy = false,
         //},
+        .vaxis = .{
+            .url = "https://github.com/rockorager/libvaxis/archive/refs/tags/v0.5.1.tar.gz",
+            .hash = "1220de23a3240e503397ea579de4fd85db422f537e10036ef74717c50164475813ce",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.

@@ -1,6 +1,7 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
 const Event = @import("event.zig").Event;
+const colours = @import("colours.zig");
 const nanotime = @import("timer.zig").nanotime;
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
@@ -23,10 +24,10 @@ pub const TextMode = enum(u2) {
 
     pub fn toColor(self: TextMode) vaxis.Color {
         return switch (self) {
-            TextMode.NORMAL => vaxis.Color{ .rgb = .{ 0xFF, 0x00, 0x00 } },
-            TextMode.INSERT => vaxis.Color{ .rgb = .{ 0x00, 0xFF, 0x00 } },
-            TextMode.VISUAL => vaxis.Color{ .rgb = .{ 0x00, 0x00, 0xFF } },
-            TextMode.COMMAND => vaxis.Color{ .rgb = .{ 0x00, 0xFF, 0xFF } },
+            TextMode.NORMAL => colours.RED,
+            TextMode.INSERT => colours.YELLOW,
+            TextMode.VISUAL => colours.MAGENTA,
+            TextMode.COMMAND => colours.CYAN,
         };
     }
 };
@@ -58,7 +59,7 @@ pub const Flow = struct {
             .buffer = undefined,
             .buffer_init = false,
             .mode = TextMode.NORMAL,
-            .cursor_blink_ns = 2 * std.time.ns_per_ms,
+            .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
         };
     }
@@ -190,7 +191,6 @@ pub const Flow = struct {
                 if (self.buffer_init) {
                     _ = self.allocator.resize(self.buffer, ws.cols * ws.rows);
                 } else {
-                    std.log.info("H: {} W: {}", .{ ws.cols, ws.rows });
                     self.buffer = try self.allocator.alloc(u8, ws.cols * ws.rows);
                     @memset(self.buffer, 0);
                     std.mem.copyForwards(u8, self.buffer, "Hello world!");
@@ -247,11 +247,17 @@ pub const Flow = struct {
                 .limit = 1,
             },
         });
-        var style = vaxis.Style{ .bg = .default };
+        var style: vaxis.Style = undefined;
         if (cursor_blink) {
-            style.bg = vaxis.Color{ .rgb = .{ 0xFF, 0xFF, 0xFF } };
+            style = vaxis.Style{
+                .reverse = true,
+            };
+            // style = vaxis.Style{ .bg = colours.WHITE, .fg = colours.BLACK };
+        } else {
+            style = .{ .bg = .default, .fg = .default };
         }
-        _ = try cursor.printSegment(.{ .text = " ", .style = style }, .{});
+        const cursor_index = (self.vx.screen.cursor_row * win.width) + self.vx.screen.cursor_col;
+        _ = try cursor.printSegment(.{ .text = self.buffer[cursor_index .. cursor_index + 1], .style = style }, .{});
 
         const mode_string = switch (self.mode) {
             TextMode.NORMAL => " NORMAL ",

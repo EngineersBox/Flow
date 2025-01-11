@@ -163,7 +163,10 @@ pub const Flow = struct {
             return;
         }
         const pos = (row * self.vx.screen.width) + col;
-        std.mem.copyBackwards(u8, self.buffer[pos + 1 ..], self.buffer[pos .. last_pos - 1]);
+        if (col >= self.vx.screen.width) {
+            return;
+        }
+        std.mem.copyBackwards(u8, self.buffer[pos + 1 .. last_pos], self.buffer[pos .. last_pos - 1]);
         self.buffer[pos] = char;
         self.vx.screen.cursor_col += 1;
     }
@@ -172,17 +175,16 @@ pub const Flow = struct {
         const last_pos = ((row + 1) * self.vx.screen.width) - 1;
         const pos = (row * self.vx.screen.width) + col;
         if (remove_ahead and pos != last_pos) {
-            std.mem.copyForwards(u8, self.buffer[pos..], self.buffer[pos + 1 .. last_pos]);
+            std.mem.copyForwards(u8, self.buffer[pos .. last_pos - 1], self.buffer[pos + 1 .. last_pos]);
             self.buffer[last_pos] = 0;
         } else if (!remove_ahead and pos != 0) {
-            std.mem.copyForwards(u8, self.buffer[pos - 1 ..], self.buffer[pos..last_pos]);
+            std.mem.copyForwards(u8, self.buffer[pos - 1 .. last_pos - 1], self.buffer[pos..last_pos]);
             self.buffer[last_pos] = 0;
             self.vx.screen.cursor_col -= 1;
         }
     }
 
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
-        // NOTE: Emulates labelled switch with continue until zig 0.14.0 releases
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF => if (self.buffer_init) {

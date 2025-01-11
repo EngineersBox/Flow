@@ -9,7 +9,8 @@ pub const Page: type = struct {
 };
 
 pub const MmapPager: type = struct {
-    pub const PageSize: u64 = 4 * 1024;
+    pub const MaxFileSize: u64 = 8 * 1024 * 1024 * 1024; // 8 GB
+    pub const PageSize: u64 = 4 * 1024; // 4 KB
 
     ptr: []align(std.mem.page_size) u8,
     len: u64,
@@ -17,7 +18,15 @@ pub const MmapPager: type = struct {
 
     pub fn init(fd: std.os.fd_t, allocator: *std.mem.Allocator) !MmapPager {
         const stats = try std.os.fstat(fd);
-        const ptr = try std.os.mmap(null, @as(usize, stats.size), std.os.PROT_READ | std.os.PROT_WRITE, std.os.MAP_SHARED, fd, 0);
+        if (stats.size > MaxFileSize) {
+            return error.FileTooLarge;
+        }
+        // TODO: Refactor to reserve a MAP_ANONYMOUS continuous space of 8 GB
+        //       and then mmap sections of the file into it.
+
+        // Create a contiguous virtual address space over the file
+        // with space for expansion
+        const ptr = try std.os.mmap(null, MaxFileSize, std.os.PROT_READ | std.os.PROT_WRITE, std.os.MAP_SHARED, fd, 0);
         return .{
             .ptr = ptr,
             .len = @as(u64, stats.size),

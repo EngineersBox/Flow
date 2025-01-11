@@ -166,6 +166,7 @@ pub const Flow = struct {
         if (col >= self.vx.screen.width) {
             return;
         }
+        // FIXME: Out of bounds indexing here
         std.mem.copyBackwards(u8, self.buffer[pos + 1 .. last_pos], self.buffer[pos .. last_pos - 1]);
         self.buffer[pos] = char;
         self.vx.screen.cursor_col += 1;

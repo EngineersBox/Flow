@@ -13,9 +13,9 @@ pub const FileBuffer = struct {
 
     gap: gb.GapBuffer(u8),
     file_path: []const u8,
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
-    pub fn init(file_path: []const u8, allocator: *std.mem.Allocator) !FileBuffer {
+    pub fn init(file_path: []const u8, allocator: std.mem.Allocator) !FileBuffer {
         // const stats = try std.os.fstat(fd);
         // if (stats.size > AnonMapSize) {
         //     return error.FileTooLarge;
@@ -29,7 +29,7 @@ pub const FileBuffer = struct {
             return error.FileTooLarge;
         }
         const buf = try file.readToEndAlloc(allocator, @intCast(stats.size));
-        const gap = try gb.GapBuffer(u8).fromOwnedSlice(allocator, buf);
+        const gap = gb.GapBuffer(u8).fromOwnedSlice(allocator, buf);
         file.close();
         return .{
             .gap = gap,
@@ -93,6 +93,7 @@ pub const FileBuffer = struct {
         const slice: []u8 = try self.gap.toOwnedSlice();
         try file.writeAll(slice);
         self.gap.deinit();
-        self.gap = try gb.GapBuffer(u8).fromOwnedSlice(self.allocator, slice);
+        self.gap = gb.GapBuffer(u8).fromOwnedSlice(self.allocator, slice);
+        file.close();
     }
 };

@@ -16,7 +16,7 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     if (args.len < 2) {
         std.process.argsFree(allocator, args);
-        std.log.err("Usage: flow <file path>\n");
+        std.log.err("Usage: flow <file path>\n", .{});
         return;
     }
     const cwd_path = try std.fs.cwd().realpathAlloc(allocator, ".");

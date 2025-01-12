@@ -58,7 +58,7 @@ pub const Flow = struct {
             .tty = try vaxis.Tty.init(),
             .vx = try vaxis.init(allocator, .{}),
             .mouse = null,
-            .buffer = try FileBuffer(file_path, allocator),
+            .buffer = try FileBuffer.init(file_path, allocator),
             .mode = TextMode.NORMAL,
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
@@ -155,17 +155,19 @@ pub const Flow = struct {
     }
 
     fn updateGapInBuffer(self: *Flow) void {
-        const offset: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
-        self.buffer.gap.moveGap(offset);
+        const offset_opt: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+        if (offset_opt) |offset| {
+            self.buffer.gap.moveGap(offset);
+        }
     }
 
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF => {
-                const offset: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
-                if (offset != null) {
-                    self.buffer.gap.insertBefore(offset, @intCast(key.codepoint));
+                const offset_opt: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+                if (offset_opt) |offset| {
+                    try self.buffer.gap.insertBefore(offset, @intCast(key.codepoint));
                 }
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
@@ -174,11 +176,11 @@ pub const Flow = struct {
                     return;
                 } else if (key.codepoint == vaxis.Key.delete) {
                     // Forward delete
-                    _ = self.buffer.gap.orderedRemove(offset);
+                    _ = self.buffer.gap.orderedRemove(offset.?);
                     return;
                 } else if (self.vx.screen.cursor_col > 0) {
                     // Backward delete
-                    _ = self.buffer.gap.orderedRemove(offset - 1);
+                    _ = self.buffer.gap.orderedRemove(offset.? - 1);
                 }
             },
             vaxis.Key.left => {

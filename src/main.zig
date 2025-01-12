@@ -13,9 +13,20 @@ pub fn main() !void {
         }
     }
     const allocator = gpa.allocator();
+    const args = try std.process.argsAlloc(allocator);
+    if (args.len < 2) {
+        std.process.argsFree(allocator, args);
+        std.log.err("Usage: flow <file path>\n");
+        return;
+    }
+    const cwd_path = try std.fs.cwd().realpathAlloc(allocator, ".");
+    const file_path = try std.fs.path.resolve(allocator, &.{ cwd_path, args[1] });
+    defer allocator.free(file_path);
+    allocator.free(cwd_path);
+    std.process.argsFree(allocator, args);
 
     // Initialize our application
-    var app = try Flow.init(allocator);
+    var app = try Flow.init(allocator, file_path);
     defer app.deinit();
 
     // Run the application

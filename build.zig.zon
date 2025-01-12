@@ -59,6 +59,10 @@
             .url = "https://github.com/lfcm64/z-tree-sitter/archive/refs/tags/v0.1.0.zip",
             .hash = "12205e50a5dcc02940500ed84fa03752a5e0e7859fbd16c17db015d8adec1f174b08",
         },
+        .gap_buffer = .{
+            .url = "https://github.com/ryleelyman/GapBuffer.zig/archive/9039708e09fc3eb5f698ab5694a436afe503c6a6.tar.gz",
+            .hash = "1220f525973ae804ec0284556bfc47db7b6a8dc86464a853956ef859d6e0fb5fa93b",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.

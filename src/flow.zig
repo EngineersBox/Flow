@@ -3,6 +3,7 @@ const vaxis = @import("vaxis");
 const Event = @import("event.zig").Event;
 const colours = @import("colours.zig");
 const nanotime = @import("timer.zig").nanotime;
+const FileBuffer = @import("buffer.zig").FileBuffer;
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
 /// panics occur
@@ -43,23 +44,21 @@ pub const Flow = struct {
     vx: vaxis.Vaxis,
     /// A mouse event that we will handle in the draw cycle
     mouse: ?vaxis.Mouse,
-    buffer: []u8,
-    buffer_init: bool,
+    buffer: FileBuffer,
     mode: TextMode,
     cursor_blink_ns: u64,
     previous_draw: u64,
     // NOTE: Needed to outlive the flush call
     cursor_pos_buffer: []u8,
 
-    pub fn init(allocator: std.mem.Allocator) !Flow {
+    pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
         return .{
             .allocator = allocator,
             .should_quit = false,
             .tty = try vaxis.Tty.init(),
             .vx = try vaxis.init(allocator, .{}),
             .mouse = null,
-            .buffer = undefined,
-            .buffer_init = false,
+            .buffer = try FileBuffer(file_path, allocator),
             .mode = TextMode.NORMAL,
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
@@ -73,7 +72,7 @@ pub const Flow = struct {
         // memory
         self.vx.deinit(self.allocator, self.tty.anyWriter());
         self.tty.deinit();
-        self.allocator.free(self.buffer);
+        self.buffer.deinit();
     }
 
     pub fn run(self: *Flow) !void {
@@ -155,63 +154,57 @@ pub const Flow = struct {
         }
     }
 
-    fn writeCharAtPos(self: *Flow, char: u8, col: usize, row: usize) void {
-        const last_pos = ((row + 1) * self.vx.screen.width) - 1;
-        const last_row_char: u8 = self.buffer[last_pos];
-        if (last_row_char != 0 and last_row_char != vaxis.Key.space and last_row_char != vaxis.Key.tab) {
-            // Non-printable characters
-            return;
-        }
-        const pos = (row * self.vx.screen.width) + col;
-        if (col >= self.vx.screen.width) {
-            return;
-        }
-        // FIXME: Out of bounds indexing here
-        std.mem.copyBackwards(u8, self.buffer[pos + 1 .. last_pos], self.buffer[pos .. last_pos - 1]);
-        self.buffer[pos] = char;
-        self.vx.screen.cursor_col += 1;
-    }
-
-    fn deleteCharAtPos(self: *Flow, remove_ahead: bool, col: usize, row: usize) void {
-        const last_pos = ((row + 1) * self.vx.screen.width) - 1;
-        const pos = (row * self.vx.screen.width) + col;
-        if (remove_ahead and pos != last_pos) {
-            std.mem.copyForwards(u8, self.buffer[pos .. last_pos - 1], self.buffer[pos + 1 .. last_pos]);
-            self.buffer[last_pos] = 0;
-        } else if (!remove_ahead and pos != 0) {
-            std.mem.copyForwards(u8, self.buffer[pos - 1 .. last_pos - 1], self.buffer[pos..last_pos]);
-            self.buffer[last_pos] = 0;
-            self.vx.screen.cursor_col -= 1;
-        }
+    fn updateGapInBuffer(self: *Flow) void {
+        const offset: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+        self.buffer.gap.moveGap(offset);
     }
 
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
-            vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF => if (self.buffer_init) {
-                self.writeCharAtPos(@intCast(key.codepoint), self.vx.screen.cursor_col, self.vx.screen.cursor_row);
+            vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF => {
+                const offset: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+                if (offset != null) {
+                    self.buffer.gap.insertBefore(offset, @intCast(key.codepoint));
+                }
             },
-            vaxis.Key.delete, vaxis.Key.backspace => if (self.buffer_init) {
-                self.deleteCharAtPos(key.codepoint == vaxis.Key.delete, self.vx.screen.cursor_col, self.vx.screen.cursor_row);
+            vaxis.Key.delete, vaxis.Key.backspace => {
+                const offset: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+                if (offset == null) {
+                    return;
+                } else if (key.codepoint == vaxis.Key.delete) {
+                    // Forward delete
+                    _ = self.buffer.gap.orderedRemove(offset);
+                    return;
+                } else if (self.vx.screen.cursor_col > 0) {
+                    // Backward delete
+                    _ = self.buffer.gap.orderedRemove(offset - 1);
+                }
             },
             vaxis.Key.left => {
                 if (self.vx.screen.cursor_col > 0) {
                     self.vx.screen.cursor_col -= 1;
+                    self.updateGapInBuffer();
                 }
             },
             vaxis.Key.down => {
                 if (self.vx.screen.cursor_row < self.vx.screen.height - 2) {
                     self.vx.screen.cursor_row += 1;
+                    self.updateGapInBuffer();
                 }
             },
             vaxis.Key.up => {
                 if (self.vx.screen.cursor_row > 0) {
                     self.vx.screen.cursor_row -= 1;
+                    self.updateGapInBuffer();
                 }
             },
             vaxis.Key.right => {
                 if (self.vx.screen.cursor_col < self.vx.screen.width - 1) {
+                    // TODO: Check if next char is a newline,
+                    //       if so move to first col in next row
                     self.vx.screen.cursor_col += 1;
+                    self.updateGapInBuffer();
                 }
             },
             else => {},
@@ -226,6 +219,14 @@ pub const Flow = struct {
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             'q' => self.should_quit = true,
+            'w' => {
+                try self.buffer.save();
+                self.mode = TextMode.NORMAL;
+            },
+            'x' => {
+                try self.buffer.save();
+                self.should_quit = true;
+            },
             else => return,
         }
     }
@@ -242,14 +243,6 @@ pub const Flow = struct {
             .mouse => |mouse| self.mouse = mouse,
             .winsize => |ws| {
                 try self.vx.resize(self.allocator, self.tty.anyWriter(), ws);
-                if (self.buffer_init) {
-                    _ = self.allocator.resize(self.buffer, ws.cols * (ws.rows - 1));
-                } else {
-                    self.buffer = try self.allocator.alloc(u8, ws.cols * (ws.rows - 1));
-                    @memset(self.buffer, 0);
-                    std.mem.copyForwards(u8, self.buffer, "Hello world!");
-                    self.buffer_init = true;
-                }
             },
             else => {},
         }

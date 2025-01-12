@@ -8,6 +8,25 @@ pub const Position = struct {
     col: usize,
 };
 
+pub const FileBufferIterator = struct {
+    gap: *gb.GapBuffer(u8),
+    from_line: usize,
+    to_line: usize,
+
+    pub fn init(gap: *gb.GapBuffer(u8), from_line: usize, to_line: usize) FileBufferIterator {
+        return .{
+            .gap = gap,
+            .from_line = from_line,
+            .to_line = to_line,
+        };
+    }
+
+    pub fn next(self: *FileBufferIterator) ?[]u8 {
+        // TODO: Between line range, return next line ending with \n
+    }
+
+};
+
 pub const FileBuffer = struct {
     pub const MaxFileSize: u64 = 1 * 1024 * 1024 * 1024; // 1 GB
 
@@ -96,4 +115,9 @@ pub const FileBuffer = struct {
         self.gap = gb.GapBuffer(u8).fromOwnedSlice(self.allocator, slice);
         file.close();
     }
+    
+    pub fn lines(self: *FileBuffer) type {
+
+    }
+
 };

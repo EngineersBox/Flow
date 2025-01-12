@@ -14,16 +14,51 @@ pub const Range = struct {
     end: usize,
 };
 
+pub const FileBufferLine = struct {
+    // Slice from buffer before gap
+    first: ?[]u8,
+    // Slice from buffer after gap
+    second: ?[]u8,
+};
+
 pub const FileBufferIterator = struct {
     gap: *gb.GapBuffer(u8),
-    window_range: Range,
-    utf8_iter: std.unicode.Utf8Iterator,
+    first_range: ?Range,
+    second_range: ?Range,
+    first_index: ?usize,
+    second_index: ?usize,
 
     pub fn init(gap: *gb.GapBuffer(u8), window_range: Range) FileBufferIterator {
+        var first_range: ?Range = null;
+        var second_range: ?Range = null;
+        var first_index: ?usize = null;
+        var second_index: ?usize = null;
+        if (window_range.end < gap.items.len) {
+            first_range = window_range;
+            first_index = window_range.start;
+        } else if (window_range.start < gap.items.len) {
+            first_range = Range{
+                .start = window_range.start,
+                .end = gap.items.len - 1,
+            };
+            first_index = first_range.?.start;
+            second_range = Range{
+                .start = 0,
+                .end = window_range.end - gap.items.len,
+            };
+        } else {
+            second_range = Range{
+                .start = window_range.start - gap.items.len,
+                .end = window_range.end - gap.items.len,
+            };
+            second_index = second_range.?.start;
+        }
         return .{
             .gap = gap,
-            .window_range = window_range,
-            .utf8_iter = std.unicode.Utf8View.initUnchecked(gap.items[0..gap.items.len]).iterator(),
+            .first_range = first_range,
+            .second_range = second_range,
+            .first_index = first_index,
+            .second_index = second_index,
         };
     }
 
@@ -36,10 +71,23 @@ pub const FileBufferIterator = struct {
         return self.gap.secondHalf()[i - self.gap.items.len];
     }
 
-    pub fn next(self: *FileBufferIterator) ?[]u8 {
+    pub fn next(self: *FileBufferIterator) FileBufferLine {
         // TODO: Iterate the lines!
+        // NOTE: If the gap is within a line, then that line will be split across
+        //       the first and second buffers. We could return a tuple from this
+        //       method that has the first section only if the entire line is
+        //       available in the first buffer and similarly for the second. It
+        //       also allows for slices from the first and second buffer to be
+        //       returned when the line is split between ranges.
+        if (self.first_range) |range| {
+            self.first_index = self.first_index orelse range.start;
+            // Read line from index until either a newline or buffer exhausted
+            // is reached. These cases should be distinguished as buffer exhausted
+            // case necessitates reading from the after gap buffer until a newline
+            // is found. If the second buffer is exhausted as well, then we return
+            // both slices and ensure the iterator terminates after this call.
+        }
     }
-
 };
 
 pub const FileBuffer = struct {
@@ -104,7 +152,7 @@ pub const FileBuffer = struct {
         const line_direction: isize = std.math.sign(move_amount) + 1;
         var offset: usize = self.buffer_line_range_indicies.?.start;
         var total_move = @abs(move_amount);
-        while (total_move > 0): (offset += line_direction) {
+        while (total_move > 0) : (offset += line_direction) {
             const char: ?u8 = self.indexBuffer(offset);
             if (char == null) {
                 return;
@@ -116,7 +164,7 @@ pub const FileBuffer = struct {
         self.buffer_line_range_indicies.?.start = offset + line_direction;
         offset = self.buffer_line_range_indicies.?.end;
         total_move = @abs(move_amount) + 1;
-        while (total_move > 0): (offset += line_direction) {
+        while (total_move > 0) : (offset += line_direction) {
             const char: ?u8 = self.indexBuffer(offset);
             if (char == null) {
                 return;
@@ -180,9 +228,8 @@ pub const FileBuffer = struct {
         self.gap = gb.GapBuffer(u8).fromOwnedSlice(self.allocator, slice);
         file.close();
     }
-    
+
     pub fn lineIterator(self: *FileBuffer) type {
         return FileBufferIterator.init(&self.gap, self.buffer_line_range_indicies);
     }
-
 };

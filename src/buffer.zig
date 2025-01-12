@@ -83,13 +83,13 @@ pub const FileBuffer = struct {
         }
         // If the position wasn't in the second half, it could be at the end of the buffer
         if (line == pos.line and col == pos.col) {
-            return self.data.items.len;
+            return self.gap.items.len;
         }
         return null;
     }
 
     pub fn save(self: *FileBuffer) !void {
-        const file = try std.fs.createFileAbsolute(self.file_path, .{ .mode = std.fs.File.OpenMode.write_only, .read = false, .truncate = true });
+        const file = try std.fs.createFileAbsolute(self.file_path, .{ .mode = 0o666, .read = false, .truncate = true });
         const slice: []u8 = try self.gap.toOwnedSlice();
         try file.writeAll(slice);
         self.gap.deinit();

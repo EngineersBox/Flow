@@ -8,21 +8,36 @@ pub const Position = struct {
     col: usize,
 };
 
+/// A range between two positions in a buffer. Inclusive.
+pub const Range = struct {
+    start: usize,
+    end: usize,
+};
+
 pub const FileBufferIterator = struct {
     gap: *gb.GapBuffer(u8),
-    from_line: usize,
-    to_line: usize,
+    window_range: Range,
+    utf8_iter: std.unicode.Utf8Iterator,
 
-    pub fn init(gap: *gb.GapBuffer(u8), from_line: usize, to_line: usize) FileBufferIterator {
+    pub fn init(gap: *gb.GapBuffer(u8), window_range: Range) FileBufferIterator {
         return .{
             .gap = gap,
-            .from_line = from_line,
-            .to_line = to_line,
+            .window_range = window_range,
+            .utf8_iter = std.unicode.Utf8View.initUnchecked(gap.items[0..gap.items.len]).iterator(),
         };
     }
 
+    fn indexBuffer(self: *FileBufferIterator, i: usize) ?u8 {
+        if (i < 0 or i > self.gap.capacity) {
+            return null;
+        } else if (i < self.gap.items.len) {
+            return self.gap.items[i];
+        }
+        return self.gap.secondHalf()[i - self.gap.items.len];
+    }
+
     pub fn next(self: *FileBufferIterator) ?[]u8 {
-        // TODO: Between line range, return next line ending with \n
+        // TODO: Iterate the lines!
     }
 
 };
@@ -33,6 +48,7 @@ pub const FileBuffer = struct {
     gap: gb.GapBuffer(u8),
     file_path: []const u8,
     allocator: std.mem.Allocator,
+    buffer_line_range_indicies: ?Range,
 
     pub fn init(file_path: []const u8, allocator: std.mem.Allocator) !FileBuffer {
         // const stats = try std.os.fstat(fd);
@@ -54,11 +70,62 @@ pub const FileBuffer = struct {
             .gap = gap,
             .file_path = file_path,
             .allocator = allocator,
+            .buffer_line_range_indicies = null,
         };
     }
 
     pub fn deinit(self: *FileBuffer) void {
         self.gap.deinit();
+    }
+
+    pub fn applyBufferWindow(self: *FileBuffer, height: usize) void {
+        self.buffer_line_range_indicies = Range{
+            .start = 0,
+            .end = self.cursorOffset(.{ .line = height, .col = 0 }) orelse @max(1, @max(self.gap.items.len, self.gap.capacity)) - 1,
+        };
+    }
+
+    fn indexBuffer(self: *FileBuffer, i: usize) ?u8 {
+        if (i < 0 or i > self.gap.capacity) {
+            return null;
+        } else if (i < self.gap.items.len) {
+            return self.gap.items[i];
+        }
+        return self.gap.secondHalf()[i - self.gap.items.len];
+    }
+
+    /// Move the buffer window up or down by a given amount of lines.
+    /// A negative move amount will push the window up, whereas a positive
+    /// value will move it down
+    pub fn updateBufferWindow(self: *FileBuffer, move_amount: isize) void {
+        if (self.buffer_line_range_indicies == null or move_amount == 0) {
+            return;
+        }
+        const line_direction: isize = std.math.sign(move_amount) + 1;
+        var offset: usize = self.buffer_line_range_indicies.?.start;
+        var total_move = @abs(move_amount);
+        while (total_move > 0): (offset += line_direction) {
+            const char: ?u8 = self.indexBuffer(offset);
+            if (char == null) {
+                return;
+            }
+            if (std.mem.eql(u8, char.?, "\n")) {
+                total_move -= 1;
+            }
+        }
+        self.buffer_line_range_indicies.?.start = offset + line_direction;
+        offset = self.buffer_line_range_indicies.?.end;
+        total_move = @abs(move_amount) + 1;
+        while (total_move > 0): (offset += line_direction) {
+            const char: ?u8 = self.indexBuffer(offset);
+            if (char == null) {
+                return;
+            }
+            if (std.mem.eql(u8, char.?, "\n")) {
+                total_move -= 1;
+            }
+        }
+        self.buffer_line_range_indicies.?.end = offset + line_direction;
     }
 
     pub fn cursorOffset(self: *FileBuffer, pos: Position) ?usize {
@@ -69,13 +136,12 @@ pub const FileBuffer = struct {
         const first_half = self.gap.items[0..self.gap.items.len];
         var line: usize = 0;
         var col: usize = 0;
-        var iter = std.unicode.Utf8View.initUnchecked(first_half).iterator();
         var offset: usize = 0;
-        while (iter.nextCodepointSlice()) |c| : (offset += c.len) {
+        while (offset < first_half.len) : (offset += 1) {
             if (line == pos.line and col == pos.col) {
                 return offset; // Have we found the correct position?
             }
-            if (std.mem.eql(u8, c, "\n")) {
+            if (std.mem.eql(u8, first_half[offset], "\n")) {
                 line += 1;
                 col = 0;
             } else {
@@ -87,13 +153,12 @@ pub const FileBuffer = struct {
             return self.gap.second_start;
         }
         const second_half = self.gap.secondHalf();
-        iter = std.unicode.Utf8View.initUnchecked(second_half).iterator();
         offset = 0;
-        while (iter.nextCodepointSlice()) |c| : (offset += c.len) {
+        while (offset < second_half.len) : (offset += 1) {
             if (line == pos.line and col == pos.col) {
                 return self.gap.second_start + offset; // Have we found the correct position?
             }
-            if (std.mem.eql(u8, c, "\n")) {
+            if (std.mem.eql(u8, second_half[offset], "\n")) {
                 line += 1;
                 col = 0;
             } else {
@@ -102,7 +167,7 @@ pub const FileBuffer = struct {
         }
         // If the position wasn't in the second half, it could be at the end of the buffer
         if (line == pos.line and col == pos.col) {
-            return self.gap.items.len;
+            return self.gap.capacity;
         }
         return null;
     }
@@ -116,8 +181,8 @@ pub const FileBuffer = struct {
         file.close();
     }
     
-    pub fn lines(self: *FileBuffer) type {
-
+    pub fn lineIterator(self: *FileBuffer) type {
+        return FileBufferIterator.init(&self.gap, self.buffer_line_range_indicies);
     }
 
 };

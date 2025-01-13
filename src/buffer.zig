@@ -61,25 +61,28 @@ pub const FileBufferIterator = struct {
 pub const FileBuffer = struct {
     pub const MaxFileSize: u64 = 1 * 1024 * 1024 * 1024; // 1 GB
 
+    file_buffer: []u8,
     piecetable: PieceTable,
     file_path: []const u8,
     allocator: std.mem.Allocator,
     buffer_line_range_indicies: ?Range,
 
-    fn pieceTableFromFile(allocator: std.mem.Allocator, file_path: []const u8) !PieceTable {
+    fn pieceTableFromFile(allocator: std.mem.Allocator, file_path: []const u8) !struct { []u8, PieceTable } {
         const file: std.fs.File = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
         defer file.close();
         const stats = try file.stat();
         if (stats.size > MaxFileSize) {
             return error.FileTooLarge;
         }
-        const buf = try file.readToEndAlloc(allocator, @intCast(stats.size));
-        return try PieceTable.init(allocator, buf);
+        const buffer = try file.readToEndAlloc(allocator, @intCast(stats.size));
+        return .{ buffer, try PieceTable.init(allocator, buffer) };
     }
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !FileBuffer {
+        const pt = try FileBuffer.pieceTableFromFile(allocator, file_path);
         return .{
-            .piecetable = try FileBuffer.pieceTableFromFile(allocator, file_path),
+            .file_buffer = pt[0],
+            .piecetable = pt[1],
             .file_path = file_path,
             .allocator = allocator,
             .buffer_line_range_indicies = null,
@@ -88,6 +91,7 @@ pub const FileBuffer = struct {
 
     pub fn deinit(self: *FileBuffer) void {
         self.piecetable.deinit();
+        self.allocator.free(self.file_buffer);
     }
 
     pub fn applyBufferWindow(self: *FileBuffer, height: usize) !void {
@@ -102,7 +106,7 @@ pub const FileBuffer = struct {
                 .end = self.buffer_line_range_indicies.?.start,
             };
         }
-        try self.updateBufferWindow(height);
+        try self.updateBufferWindow(@intCast(height));
     }
 
     /// Move the buffer window up or down by a given amount of lines.
@@ -113,28 +117,28 @@ pub const FileBuffer = struct {
             return;
         }
         const line_direction: isize = std.math.sign(move_amount) + 1;
-        var offset: usize = self.buffer_line_range_indicies.?.start;
+        var offset: isize = @intCast(self.buffer_line_range_indicies.?.start);
         var total_move = @abs(move_amount);
         while (total_move > 0) : (offset += line_direction) {
-            const char: u8 = self.piecetable.get(offset) catch {
+            const char: u8 = self.piecetable.get(@intCast(offset)) catch {
                 return;
             };
-            if (std.mem.eql(u8, char, "\n")) {
+            if (std.mem.eql(u8, &.{char}, "\n")) {
                 total_move -= 1;
             }
         }
-        self.buffer_line_range_indicies.?.start = offset + line_direction;
-        offset = self.buffer_line_range_indicies.?.end;
+        self.buffer_line_range_indicies.?.start = @intCast(offset + line_direction);
+        offset = @intCast(self.buffer_line_range_indicies.?.end);
         total_move = @abs(move_amount) + 1;
         while (total_move > 0) : (offset += line_direction) {
-            const char: u8 = self.piecetable.get(offset) catch {
+            const char: u8 = self.piecetable.get(@intCast(offset)) catch {
                 return;
             };
-            if (std.mem.eql(u8, char, "\n")) {
+            if (std.mem.eql(u8, &.{char}, "\n")) {
                 total_move -= 1;
             }
         }
-        self.buffer_line_range_indicies.?.end = offset + line_direction;
+        self.buffer_line_range_indicies.?.end = @intCast(offset + line_direction);
     }
     pub fn cursorOffset(self: *FileBuffer, pos: Position) ?usize {
         // TODO: Make this check only within the window lines
@@ -176,6 +180,9 @@ pub const FileBuffer = struct {
         }
         file.close();
         self.piecetable.deinit();
-        self.piecetable = try FileBuffer.pieceTableFromFile(self.allocator, self.file_path);
+        self.allocator.free(self.file_buffer);
+        const pt = try FileBuffer.pieceTableFromFile(self.allocator, self.file_path);
+        self.file_buffer = pt[0];
+        self.piecetable = pt[1];
     }
 };

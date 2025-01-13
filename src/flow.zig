@@ -36,13 +36,9 @@ pub const TextMode = enum(u2) {
 /// The application state
 pub const Flow = struct {
     allocator: std.mem.Allocator,
-    // A flag for if we should quit
     should_quit: bool,
-    /// The tty we are talking to
     tty: vaxis.Tty,
-    /// The vaxis instance
     vx: vaxis.Vaxis,
-    /// A mouse event that we will handle in the draw cycle
     mouse: ?vaxis.Mouse,
     buffer: FileBuffer,
     mode: TextMode,
@@ -64,9 +60,6 @@ pub const Flow = struct {
     }
 
     pub fn deinit(self: *Flow) void {
-        // Deinit takes an optional allocator. You can choose to pass an allocator to clean up
-        // memory, or pass null if your application is shutting down and let the OS clean up the
-        // memory
         self.vx.deinit(self.allocator, self.tty.anyWriter());
         self.tty.deinit();
         self.buffer.deinit();
@@ -79,26 +72,11 @@ pub const Flow = struct {
             .vaxis = &self.vx,
         };
         try loop.init();
-
-        // Start the event loop. Events will now be queued
         try loop.start();
-
         try self.vx.enterAltScreen(self.tty.anyWriter());
-
-        // Query the terminal to detect advanced features, such as kitty keyboard protocol, etc.
-        // This will automatically enable the features in the screen you are in, so you will want to
-        // call it after entering the alt screen if you are a full screen application. The second
-        // arg is a timeout for the terminal to send responses. Typically the response will be very
-        // fast, however it could be slow on ssh connections.
         try self.vx.queryTerminal(self.tty.anyWriter(), 5 * std.time.ns_per_s);
-
-        // Enable mouse events
         try self.vx.setMouseMode(self.tty.anyWriter(), true);
-
-        // This is the main event loop. The basic structure is
-        // 1. Handle events
-        // 2. Draw application
-        // 3. Render
+        try self.buffer.applyBufferWindow(self.vx.screen.height);
         while (!self.should_quit) {
             // pollEvent blocks until we have an event
             loop.pollEvent();
@@ -200,6 +178,8 @@ pub const Flow = struct {
             'q' => self.should_quit = true,
             'w' => {
                 try self.buffer.save();
+                try self.buffer.applyBufferWindow(self.vx.screen.height);
+                try self.buffer.updateBufferWindow(@intCast(self.vx.screen.cursor_row));
                 self.mode = TextMode.NORMAL;
             },
             'x' => {
@@ -229,19 +209,8 @@ pub const Flow = struct {
 
     /// Draw our current state
     pub fn draw(self: *Flow) !void {
-        // const msg = "Hello, world!";
-
-        // Window is a bounded area with a view to the screen. You cannot draw outside of a windows
-        // bounds. They are light structures, not intended to be stored.
         const win = self.vx.window();
-
-        // Clearing the window has the effect of setting each cell to it's "default" state. Vaxis
-        // applications typically will be immediate mode, and you will redraw your entire
-        // application during the draw cycle.
         win.clear();
-
-        // In addition to clearing our window, we want to clear the mouse shape state since we may
-        // be changing that as well
         self.vx.setMouseShape(.default);
         var iterator = self.buffer.lineIterator();
         var y_offset: usize = 0;
@@ -252,7 +221,11 @@ pub const Flow = struct {
                 .width = .{ .limit = win.width },
                 .height = .{ .limit = 1 },
             });
-            _ = try child.printSegment(.{ .text = line.items, .style = .{} }, .{});
+            _ = try child.printSegment(.{ .text = line.items, .style = .{
+                .bg = colours.BLACK,
+                .fg = colours.WHITE,
+                .reverse = false,
+            } }, .{});
             defer line.deinit();
         }
         const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
@@ -275,12 +248,9 @@ pub const Flow = struct {
                 .limit = 1,
             },
         });
-        const style: vaxis.Style = vaxis.Style{
-            .reverse = true,
-        };
         const cursor_index = (self.vx.screen.cursor_row * win.width) + self.vx.screen.cursor_col;
         const cursor_value: u8 = self.buffer.piecetable.get(cursor_index) catch ' ';
-        _ = try cursor.printSegment(.{ .text = &.{cursor_value}, .style = style }, .{});
+        _ = try cursor.printSegment(.{ .text = &.{cursor_value}, .style = .{ .reverse = true } }, .{});
 
         const mode_string = switch (self.mode) {
             TextMode.NORMAL => " NORMAL ",

@@ -150,11 +150,6 @@ pub const FileBuffer = struct {
             }
         }
         self.buffer_line_range_indicies.?.end = @intCast(offset + line_direction);
-        const file = try std.fs.createFileAbsolute("/Users/jackkilrain/Desktop/Projects/zig/Flow/out.log", .{ .truncate = false });
-        const buf = try std.fmt.allocPrint(self.allocator, "Start: {d} End: {d}\n", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end });
-        _ = try file.write(buf);
-        file.close();
-        self.allocator.free(buf);
     }
     pub fn cursorOffset(self: *FileBuffer, pos: Position) ?usize {
         var line: usize = self.buffer_line_range_indicies.?.start;

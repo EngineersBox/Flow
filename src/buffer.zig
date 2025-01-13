@@ -36,7 +36,7 @@ pub const FileBufferIterator = struct {
         return true;
     }
 
-    // Caller is responsible for freeing the returned list
+    /// Caller is responsible for freeing the returned list
     pub fn next(self: *FileBufferIterator) !?std.ArrayList(u8) {
         var string = std.ArrayList(u8).init(self.allocator);
         errdefer string.deinit();
@@ -44,14 +44,12 @@ pub const FileBufferIterator = struct {
             const char: u8 = self.piecetable.get(self.offset) catch {
                 break;
             };
+            try string.append(char);
             if (!std.mem.eql(u8, &.{char}, "\n")) {
                 _ = self.piecetable.get(self.offset + 1) catch {
                     continue;
                 };
-                self.offset += 1;
-                continue;
             }
-            try string.append(char);
         }
         if (string.items.len == 0) {
             string.deinit();
@@ -131,10 +129,9 @@ pub const FileBuffer = struct {
                 _ = self.piecetable.get(@intCast(offset + line_direction)) catch {
                     break;
                 };
-                offset += line_direction;
             }
         }
-        self.buffer_line_range_indicies.?.start = @intCast(offset + line_direction);
+        self.buffer_line_range_indicies.?.start = @intCast(offset);
         offset = @intCast(self.buffer_line_range_indicies.?.end);
         total_move = @abs(move_amount) + 1;
         while (total_move > 0) : (offset += line_direction) {
@@ -146,10 +143,9 @@ pub const FileBuffer = struct {
                 _ = self.piecetable.get(@intCast(offset + line_direction)) catch {
                     break;
                 };
-                offset += line_direction;
             }
         }
-        self.buffer_line_range_indicies.?.end = @intCast(offset + line_direction);
+        self.buffer_line_range_indicies.?.end = @intCast(offset);
     }
     pub fn cursorOffset(self: *FileBuffer, pos: Position) ?usize {
         var line: usize = self.buffer_line_range_indicies.?.start;
@@ -165,10 +161,6 @@ pub const FileBuffer = struct {
             if (std.mem.eql(u8, &.{char}, "\n")) {
                 line += 1;
                 col = 0;
-                _ = self.piecetable.get(offset + 1) catch {
-                    break;
-                };
-                offset += 1;
             } else {
                 col += 1;
             }

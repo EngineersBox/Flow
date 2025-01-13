@@ -24,6 +24,11 @@ pub fn main() !void {
     defer allocator.free(file_path);
     allocator.free(cwd_path);
     std.process.argsFree(allocator, args);
+    const file = try std.fs.createFileAbsolute("/Users/jackkilrain/Desktop/Projects/zig/Flow/out.log", .{ .truncate = false });
+    const buf = try std.fmt.allocPrint(allocator, "Path: {s}\n", .{file_path});
+    _ = try file.write(buf);
+    file.close();
+    allocator.free(buf);
 
     // Initialize our application
     var app = try Flow.init(allocator, file_path);

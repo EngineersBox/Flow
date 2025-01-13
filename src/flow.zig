@@ -123,7 +123,7 @@ pub const Flow = struct {
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
-            vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF => {
+            vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF, 0x0A, 0x0D => {
                 const offset_opt: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset_opt) |offset| {
                     try self.buffer.piecetable.insert(offset, &.{@intCast(key.codepoint)});
@@ -207,6 +207,13 @@ pub const Flow = struct {
         }
     }
 
+    inline fn lineTrimNewline(line: []const u8) []const u8 {
+        if (std.mem.eql(u8, line[line.len - 1 ..], "\n")) {
+            return line[0 .. line.len - 1];
+        }
+        return line;
+    }
+
     /// Draw our current state
     pub fn draw(self: *Flow) !void {
         const win = self.vx.window();
@@ -221,7 +228,7 @@ pub const Flow = struct {
                 .width = .{ .limit = win.width },
                 .height = .{ .limit = 1 },
             });
-            _ = try child.printSegment(.{ .text = line.items, .style = .{
+            _ = try child.printSegment(.{ .text = lineTrimNewline(line.items), .style = .{
                 .bg = colours.BLACK,
                 .fg = colours.WHITE,
                 .reverse = false,

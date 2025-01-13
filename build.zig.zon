@@ -63,6 +63,10 @@
             .url = "https://github.com/ryleelyman/GapBuffer.zig/archive/9039708e09fc3eb5f698ab5694a436afe503c6a6.tar.gz",
             .hash = "1220f525973ae804ec0284556bfc47db7b6a8dc86464a853956ef859d6e0fb5fa93b",
         },
+        .piecetable = .{
+            .url = "https://github.com/engineersbox/zig-piecetable/archive/72de6cde775f8dd28f6e1c71bb830ba76ffa45ac.tar.gz",
+            .hash = "1220cede6c79b00506b38a178417da45ea966df842afa0b34eededa3b1eeb32cbb46",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.

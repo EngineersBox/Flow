@@ -48,8 +48,6 @@ pub const Flow = struct {
     mode: TextMode,
     cursor_blink_ns: u64,
     previous_draw: u64,
-    // NOTE: Needed to outlive the flush call
-    cursor_pos_buffer: []u8,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
         return .{
@@ -58,11 +56,10 @@ pub const Flow = struct {
             .tty = try vaxis.Tty.init(),
             .vx = try vaxis.init(allocator, .{}),
             .mouse = null,
-            .buffer = try FileBuffer.init(file_path, allocator),
+            .buffer = try FileBuffer.init(allocator, file_path),
             .mode = TextMode.NORMAL,
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
-            .cursor_pos_buffer = undefined,
         };
     }
 
@@ -111,15 +108,6 @@ pub const Flow = struct {
             }
             // Draw our application after handling events
             try self.draw();
-            self.previous_draw = nanotime();
-
-            // It's best to use a buffered writer for the render method. TTY provides one, but you
-            // may use your own. The provided bufferedWriter has a buffer size of 4096
-            var buffered = self.tty.bufferedWriter();
-            // Render the application to the screen
-            try self.vx.render(buffered.writer().any());
-            try buffered.flush();
-            self.allocator.free(self.cursor_pos_buffer);
         }
     }
 
@@ -154,20 +142,13 @@ pub const Flow = struct {
         }
     }
 
-    fn updateGapInBuffer(self: *Flow) void {
-        const offset_opt: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
-        if (offset_opt) |offset| {
-            self.buffer.gap.moveGap(offset);
-        }
-    }
-
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF => {
                 const offset_opt: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset_opt) |offset| {
-                    try self.buffer.gap.insertBefore(offset, @intCast(key.codepoint));
+                    try self.buffer.piecetable.insert(offset, &.{@intCast(key.codepoint)});
                 }
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
@@ -176,29 +157,26 @@ pub const Flow = struct {
                     return;
                 } else if (key.codepoint == vaxis.Key.delete) {
                     // Forward delete
-                    _ = self.buffer.gap.orderedRemove(offset.?);
+                    try self.buffer.piecetable.delete(offset.?, 1);
                     return;
                 } else if (self.vx.screen.cursor_col > 0) {
                     // Backward delete
-                    _ = self.buffer.gap.orderedRemove(offset.? - 1);
+                    try self.buffer.piecetable.delete(offset.? - 1, 1);
                 }
             },
             vaxis.Key.left => {
                 if (self.vx.screen.cursor_col > 0) {
                     self.vx.screen.cursor_col -= 1;
-                    self.updateGapInBuffer();
                 }
             },
             vaxis.Key.down => {
                 if (self.vx.screen.cursor_row < self.vx.screen.height - 2) {
                     self.vx.screen.cursor_row += 1;
-                    self.updateGapInBuffer();
                 }
             },
             vaxis.Key.up => {
                 if (self.vx.screen.cursor_row > 0) {
                     self.vx.screen.cursor_row -= 1;
-                    self.updateGapInBuffer();
                 }
             },
             vaxis.Key.right => {
@@ -206,7 +184,6 @@ pub const Flow = struct {
                     // TODO: Check if next char is a newline,
                     //       if so move to first col in next row
                     self.vx.screen.cursor_col += 1;
-                    self.updateGapInBuffer();
                 }
             },
             else => {},
@@ -266,23 +243,27 @@ pub const Flow = struct {
         // In addition to clearing our window, we want to clear the mouse shape state since we may
         // be changing that as well
         self.vx.setMouseShape(.default);
-        for (0..win.height - 1) |i| {
+        var iterator = self.buffer.lineIterator();
+        var y_offset: usize = 0;
+        while (try iterator.next()) |line| : (y_offset += 1) {
             const child = win.child(.{
                 .x_off = 0,
-                .y_off = i,
+                .y_off = y_offset,
                 .width = .{ .limit = win.width },
                 .height = .{ .limit = 1 },
             });
-            _ = try child.printSegment(.{ .text = self.buffer[(i * win.height)..((i + 1) * win.height)], .style = .{} }, .{});
+            _ = try child.printSegment(.{ .text = line.items, .style = .{} }, .{});
+            defer line.deinit();
         }
-        self.cursor_pos_buffer = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
+        const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
+        defer self.allocator.free(cursor_pos_buffer);
         const status_bar = win.child(.{
-            .x_off = win.width - self.cursor_pos_buffer.len - 1,
+            .x_off = win.width - cursor_pos_buffer.len - 1,
             .y_off = win.height - 1,
-            .width = .{ .limit = self.cursor_pos_buffer.len },
+            .width = .{ .limit = cursor_pos_buffer.len },
             .height = .{ .limit = 1 },
         });
-        _ = try status_bar.printSegment(.{ .text = self.cursor_pos_buffer, .style = .{} }, .{});
+        _ = try status_bar.printSegment(.{ .text = cursor_pos_buffer, .style = .{} }, .{});
 
         const cursor = win.child(.{
             .x_off = self.vx.screen.cursor_col,
@@ -298,12 +279,8 @@ pub const Flow = struct {
             .reverse = true,
         };
         const cursor_index = (self.vx.screen.cursor_row * win.width) + self.vx.screen.cursor_col;
-        var cursor_value: []u8 = self.buffer[cursor_index .. cursor_index + 1];
-        if (cursor_value[0] == 0) {
-            // Need a printable character to change the style colours for some reason
-            cursor_value[0] = ' ';
-        }
-        _ = try cursor.printSegment(.{ .text = cursor_value, .style = style }, .{});
+        const cursor_value: u8 = self.buffer.piecetable.get(cursor_index) catch ' ';
+        _ = try cursor.printSegment(.{ .text = &.{cursor_value}, .style = style }, .{});
 
         const mode_string = switch (self.mode) {
             TextMode.NORMAL => " NORMAL ",
@@ -318,5 +295,14 @@ pub const Flow = struct {
             .height = .{ .limit = 1 },
         });
         _ = try text_mode.printSegment(.{ .text = mode_string, .style = .{ .bg = self.mode.toColor() } }, .{});
+
+        self.previous_draw = nanotime();
+
+        // It's best to use a buffered writer for the render method. TTY provides one, but you
+        // may use your own. The provided bufferedWriter has a buffer size of 4096
+        var buffered = self.tty.bufferedWriter();
+        // Render the application to the screen
+        try self.vx.render(buffered.writer().any());
+        try buffered.flush();
     }
 };

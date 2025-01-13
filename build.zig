@@ -17,6 +17,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const piecetable = b.dependency("piecetable", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const exe = b.addExecutable(.{
         .name = "flow",
         .root_source_file = b.path("src/main.zig"),
@@ -28,6 +32,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("vaxis", vaxis_dep.module("vaxis"));
     exe.root_module.addImport("zts", zts.module("zts"));
     exe.root_module.addImport("gap_buffer", gap_buffer.module("gap_buffer"));
+    exe.root_module.addImport("piecetable", piecetable.module("piecetable"));
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

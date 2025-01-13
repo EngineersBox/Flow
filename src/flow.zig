@@ -212,7 +212,7 @@ pub const Flow = struct {
         const win = self.vx.window();
         win.clear();
         self.vx.setMouseShape(.default);
-        var iterator = self.buffer.lineIterator();
+        var iterator = try self.buffer.lineIterator();
         var y_offset: usize = 0;
         while (try iterator.next()) |line| : (y_offset += 1) {
             const child = win.child(.{
@@ -237,7 +237,6 @@ pub const Flow = struct {
             .height = .{ .limit = 1 },
         });
         _ = try status_bar.printSegment(.{ .text = cursor_pos_buffer, .style = .{} }, .{});
-
         const cursor = win.child(.{
             .x_off = self.vx.screen.cursor_col,
             .y_off = self.vx.screen.cursor_row,
@@ -251,7 +250,6 @@ pub const Flow = struct {
         const cursor_index = (self.vx.screen.cursor_row * win.width) + self.vx.screen.cursor_col;
         const cursor_value: u8 = self.buffer.piecetable.get(cursor_index) catch ' ';
         _ = try cursor.printSegment(.{ .text = &.{cursor_value}, .style = .{ .reverse = true } }, .{});
-
         const mode_string = switch (self.mode) {
             TextMode.NORMAL => " NORMAL ",
             TextMode.INSERT => " INSERT ",
@@ -265,9 +263,7 @@ pub const Flow = struct {
             .height = .{ .limit = 1 },
         });
         _ = try text_mode.printSegment(.{ .text = mode_string, .style = .{ .bg = self.mode.toColor() } }, .{});
-
         self.previous_draw = nanotime();
-
         // It's best to use a buffered writer for the render method. TTY provides one, but you
         // may use your own. The provided bufferedWriter has a buffer size of 4096
         var buffered = self.tty.bufferedWriter();

@@ -38,7 +38,6 @@ pub const FileBufferIterator = struct {
 
     // Caller is responsible for freeing the returned list
     pub fn next(self: *FileBufferIterator) !?std.ArrayList(u8) {
-        // TODO: Iterate the lines!
         var string = std.ArrayList(u8).init(self.allocator);
         errdefer string.deinit();
         while (self.isFinished()) : (self.offset += 1) {
@@ -46,6 +45,10 @@ pub const FileBufferIterator = struct {
                 break;
             };
             if (!std.mem.eql(u8, &.{char}, "\n")) {
+                _ = self.piecetable.get(self.offset + 1) catch {
+                    continue;
+                };
+                self.offset += 1;
                 continue;
             }
             try string.append(char);
@@ -125,6 +128,10 @@ pub const FileBuffer = struct {
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
                 total_move -= 1;
+                _ = self.piecetable.get(@intCast(offset + line_direction)) catch {
+                    break;
+                };
+                offset += line_direction;
             }
         }
         self.buffer_line_range_indicies.?.start = @intCast(offset + line_direction);
@@ -136,17 +143,24 @@ pub const FileBuffer = struct {
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
                 total_move -= 1;
+                _ = self.piecetable.get(@intCast(offset + line_direction)) catch {
+                    break;
+                };
+                offset += line_direction;
             }
         }
         self.buffer_line_range_indicies.?.end = @intCast(offset + line_direction);
+        const file = try std.fs.createFileAbsolute("/Users/jackkilrain/Desktop/Projects/zig/Flow/out.log", .{ .truncate = false });
+        const buf = try std.fmt.allocPrint(self.allocator, "Start: {d} End: {d}\n", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end });
+        _ = try file.write(buf);
+        file.close();
+        self.allocator.free(buf);
     }
     pub fn cursorOffset(self: *FileBuffer, pos: Position) ?usize {
-        // TODO: Make this check only within the window lines
-        //       as the cursor will always reside within it.
-        var line: usize = 0;
+        var line: usize = self.buffer_line_range_indicies.?.start;
         var col: usize = 0;
         var offset: usize = 0;
-        while (true) : (offset += 1) {
+        while (line <= self.buffer_line_range_indicies.?.end) : (offset += 1) {
             const char: u8 = self.piecetable.get(offset) catch {
                 break;
             };
@@ -156,6 +170,10 @@ pub const FileBuffer = struct {
             if (std.mem.eql(u8, &.{char}, "\n")) {
                 line += 1;
                 col = 0;
+                _ = self.piecetable.get(offset + 1) catch {
+                    break;
+                };
+                offset += 1;
             } else {
                 col += 1;
             }
@@ -163,17 +181,25 @@ pub const FileBuffer = struct {
         return null;
     }
 
-    pub fn windowLineIterator(self: *FileBuffer, line_start: usize, line_end: usize) FileBufferIterator {
-        return FileBufferIterator.init(self.allocator, self.piecetable, line_start, line_end);
+    pub fn windowLineIterator(self: *FileBuffer) error{UninitialisedWindow}!FileBufferIterator {
+        if (self.buffer_line_range_indicies == null) {
+            return error.UninitialisedWindow;
+        }
+        return FileBufferIterator.init(
+            self.allocator,
+            self.piecetable,
+            self.buffer_line_range_indicies.?.start,
+            self.buffer_line_range_indicies.?.end,
+        );
     }
 
-    pub fn lineIterator(self: *FileBuffer) FileBufferIterator {
+    pub fn lineIterator(self: *FileBuffer) error{UninitialisedWindow}!FileBufferIterator {
         return FileBufferIterator.init(self.allocator, self.piecetable, 0, null);
     }
 
     pub fn save(self: *FileBuffer) !void {
         const file = try std.fs.createFileAbsolute(self.file_path, .{ .mode = 0o666, .read = false, .truncate = true });
-        var iterator = self.lineIterator();
+        var iterator = try self.lineIterator();
         while (try iterator.next()) |slice| {
             _ = try file.write(slice.items);
             defer slice.deinit();

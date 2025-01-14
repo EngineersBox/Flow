@@ -126,33 +126,35 @@ pub const Flow = struct {
     }
 
     fn setBufferWindow(self: *Flow, start: usize, height: usize) !void {
-        for (self.window_lines.items) |line| {
-            line.deinit();
-        }
-        self.window_lines.clearAndFree();
+        self.clearWindowLines();
         try self.buffer.setBufferWindow(start, height);
-        var line_iterator = try self.buffer.lineIterator();
-        while (try line_iterator.next()) |line| {
-            try self.window_lines.append(line);
-        }
+        _ = try self.cacheWindowLines();
     }
 
     fn updateBufferWindow(self: *Flow, offset_row: isize) !bool {
+        self.clearWindowLines();
+        const new_window_valid = try self.buffer.updateBufferWindow(offset_row);
+        _ = try self.cacheWindowLines();
+        return new_window_valid;
+    }
+
+    fn clearWindowLines(self: *Flow) void {
         for (self.window_lines.items) |line| {
-            std.log.err("Freeing line: {s}", .{line.items});
             line.deinit();
         }
         self.window_lines.clearAndFree();
-        const new_window_valid = try self.buffer.updateBufferWindow(offset_row);
+    }
+
+    /// Returns true when lines are cached, false if cache already exists
+    fn cacheWindowLines(self: *Flow) !bool {
+        if (self.window_lines.items.len != 0) {
+            return false;
+        }
         var line_iterator = try self.buffer.lineIterator();
         while (try line_iterator.next()) |line| {
             try self.window_lines.append(line);
-            std.log.err("Line: {s}", .{line.items});
         }
-        if (new_window_valid) {
-            std.log.err("New window valid", .{});
-        }
-        return new_window_valid;
+        return true;
     }
 
     inline fn confineCursorToCurrentLine(self: *Flow) void {
@@ -160,24 +162,18 @@ pub const Flow = struct {
     }
 
     fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
-        std.log.err("Lines: {d} Row: {d}", .{ self.window_lines.items.len, self.vx.screen.cursor_row });
         const line: *const std.ArrayList(u8) = &self.window_lines.items[self.vx.screen.cursor_row];
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
         new_col += offset_col;
-        std.log.err("New col: {d} Line len: {d}", .{ new_col, line.*.items.len });
-        // FIXME: The line length is 0, which implies the updateBufferWindow
-        //        call did not create lines correctly
         if (new_col >= 0 and new_col < line.*.items.len) {
             // Within line
             self.vx.screen.cursor_col = @intCast(new_col);
-            std.log.err("Updated col: {d}", .{self.vx.screen.cursor_col});
             return;
         }
         var shift_factor: isize = 1;
         if (new_col < 0) {
             shift_factor = -1;
         }
-        std.log.err("Shift factor: {d}", .{shift_factor});
         try self.shiftCursorRow(shift_factor);
     }
 
@@ -210,6 +206,8 @@ pub const Flow = struct {
                 if (offset_opt) |offset| {
                     try self.buffer.piecetable.insert(offset, &.{@intCast(key.codepoint)});
                     try self.shiftCursorCol(1);
+                    self.clearWindowLines();
+                    _ = try self.cacheWindowLines();
                 }
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
@@ -220,11 +218,15 @@ pub const Flow = struct {
                     // Forward delete
                     try self.buffer.piecetable.delete(offset.?, 1);
                     try self.shiftCursorCol(0);
+                    self.clearWindowLines();
+                    _ = try self.cacheWindowLines();
                     // TODO: Update total_line_count
                 } else if (self.vx.screen.cursor_col > 0) {
                     // Backward delete
                     try self.buffer.piecetable.delete(offset.? - 1, 1);
                     try self.shiftCursorCol(-1);
+                    self.clearWindowLines();
+                    _ = try self.cacheWindowLines();
                     // TODO: Update total_line_count
                 }
             },
@@ -256,6 +258,8 @@ pub const Flow = struct {
             'q' => self.should_quit = true,
             'w' => {
                 const current_buffer_window: Range = self.buffer.buffer_line_range_indicies.?;
+                // Pre-clear to avoid having two entire copies of the lines in the window
+                self.clearWindowLines();
                 try self.buffer.save();
                 _ = try self.updateBufferWindow(0);
                 self.buffer.buffer_line_range_indicies = current_buffer_window;
@@ -303,7 +307,6 @@ pub const Flow = struct {
         self.vx.setMouseShape(.default);
         for (self.window_lines.items, 0..) |line, y_offset| {
             const width = lineWidth(line.items, win.width);
-            std.log.err("Line: {d} Window: {d} Width: {d}\n", .{ line.items.len, win.width, width });
             const child = win.child(.{
                 .x_off = 0,
                 .y_off = y_offset,

@@ -4,27 +4,25 @@ info(vaxis): color_scheme_updates capability detected
 info(vaxis): kitty keyboard capability detected
 info(vaxis): kitty graphics capability detected
 debug(vaxis): enabling mouse mode: pixel coordinates
+error: Cleared window lines
+error: Cached window lines
 debug(vaxis): resizing screen: width=268 height=60
 debug(vaxis): resizing screen: width=268 height=60
-error: Line: 15 Window: 268 Width: 14
-
-error: Lines: 1 Row: 0
-error: New col: 1 Line len: 15
-error: Updated col: 1
-error: Line: 15 Window: 268 Width: 14
-
-error: Line: 15 Window: 268 Width: 14
-
-error: Lines: 1 Row: 0
-error: New col: 0 Line len: 15
-error: Updated col: 0
-error: Line: 15 Window: 268 Width: 14
-
-error: Line: 15 Window: 268 Width: 14
-
-error: Line: 15 Window: 268 Width: 14
-
-error: Line: 15 Window: 268 Width: 14
-
-debug(vaxis): total renders = 7
-debug(vaxis): microseconds per render = 1283
+error: Cleared window lines
+error: Cached window lines
+error: Cleared window lines
+error: Cached window lines
+error: Cleared window lines
+error: Cached window lines
+error: Cleared window lines
+error: Cached window lines
+error: Cleared window lines
+error: Cached window lines
+error: Cleared window lines
+error: Cached window lines
+error: Cleared window lines
+error: Cached window lines
+error: Cleared window lines
+error: Cached window lines
+debug(vaxis): total renders = 32
+debug(vaxis): microseconds per render = 1286

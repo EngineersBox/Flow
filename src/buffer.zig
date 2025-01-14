@@ -97,7 +97,7 @@ pub const FileBuffer = struct {
     }
 
     /// Discard existing window and create a new one
-    pub fn setBufferWindow(self: *FileBuffer, start: usize, height: usize) error{ StartExceedsSize, EndExceedsSize }!void {
+    pub fn setBufferWindow(self: *FileBuffer, start: usize, height: usize) error{StartExceedsSize}!void {
         var start_offset: usize = 0;
         var lines: usize = 0;
         while (lines < start) : (start_offset += 1) {
@@ -111,7 +111,7 @@ pub const FileBuffer = struct {
         var end_offset = start_offset;
         while (lines < start + height) : (end_offset += 1) {
             const char: u8 = self.piecetable.get(@intCast(start_offset)) catch {
-                return error.EndExceedsSize;
+                break;
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
                 lines += 1;

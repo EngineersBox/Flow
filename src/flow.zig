@@ -47,7 +47,7 @@ pub const Flow = struct {
     mode: TextMode,
     cursor_blink_ns: u64,
     previous_draw: u64,
-    window_lines: std.ArrayList(*const std.ArrayList(u8)),
+    window_lines: std.ArrayList(std.ArrayList(u8)),
     total_line_count: usize,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
@@ -61,7 +61,7 @@ pub const Flow = struct {
             .mode = TextMode.NORMAL,
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
-            .window_lines = std.ArrayList(*const std.ArrayList(u8)).init(allocator),
+            .window_lines = std.ArrayList(std.ArrayList(u8)).init(allocator),
             .total_line_count = 0,
         };
     }
@@ -126,13 +126,17 @@ pub const Flow = struct {
 
     fn updateBufferWindow(self: *Flow, offset_row: isize) !bool {
         for (self.window_lines.items) |line| {
+            std.log.err("Freeing line: {s}", .{line.items});
             line.deinit();
         }
         const new_window_valid = try self.buffer.updateBufferWindow(offset_row);
         var line_iterator = try self.buffer.lineIterator();
         while (try line_iterator.next()) |line| {
-            try self.window_lines.append(&line);
+            try self.window_lines.append(line);
             std.log.err("Line: {s}", .{line.items});
+        }
+        if (new_window_valid) {
+            std.log.err("New window valid", .{});
         }
         return new_window_valid;
     }
@@ -143,7 +147,7 @@ pub const Flow = struct {
 
     fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
         std.log.err("Lines: {d} Row: {d}", .{ self.window_lines.items.len, self.vx.screen.cursor_row });
-        const line: *const std.ArrayList(u8) = self.window_lines.items[self.vx.screen.cursor_row];
+        const line: *const std.ArrayList(u8) = &self.window_lines.items[self.vx.screen.cursor_row];
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
         new_col += offset_col;
         std.log.err("New col: {d} Line len: {d}", .{ new_col, line.*.items.len });
@@ -283,10 +287,12 @@ pub const Flow = struct {
         win.clear();
         self.vx.setMouseShape(.default);
         for (self.window_lines.items, 0..) |line, y_offset| {
+            const width = lineWidth(line.items, win.width);
+            std.log.err("Line: {d} Window: {d} Width: {d}\n", .{ line.items.len, win.width, width });
             const child = win.child(.{
                 .x_off = 0,
                 .y_off = y_offset,
-                .width = .{ .limit = lineWidth(line.items, win.width) },
+                .width = .{ .limit = width },
                 .height = .{ .limit = 1 },
             });
             _ = try child.printSegment(.{ .text = line.items, .style = .{

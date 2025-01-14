@@ -8,37 +8,48 @@ error: Line: Hello world!
 
 
 
+error: New window valid
 debug(vaxis): resizing screen: width=268 height=60
 debug(vaxis): resizing screen: width=268 height=60
-thread 512602 panic: index out of bounds: index 8176, len 4352
-/Users/jackkilrain/.cache/zig/p/122055beff332830a391e9895c044d33b15ea21063779557024b46169fb1984c6e40/src/GraphemeData.zig:77:48: 0x109aa87e0 in gbp (flow)
-    return @enumFromInt(self.s3[self.s2[self.s1[cp >> 8] + (cp & 0xff)]] >> 4);
-                                               ^
-/Users/jackkilrain/.cache/zig/p/122055beff332830a391e9895c044d33b15ea21063779557024b46169fb1984c6e40/src/grapheme.zig:144:34: 0x109a6fee6 in graphemeBreak (flow)
-    const cp2_gbp_prop = data.gbp(cp2);
-                                 ^
-/Users/jackkilrain/.cache/zig/p/122055beff332830a391e9895c044d33b15ea21063779557024b46169fb1984c6e40/src/grapheme.zig:57:26: 0x109a4c34d in next (flow)
-        if (graphemeBreak(
-                         ^
-/Users/jackkilrain/.cache/zig/p/1220de23a3240e503397ea579de4fd85db422f537e10036ef74717c50164475813ce/src/Window.zig:292:33: 0x109a4aa68 in print (flow)
-                while (iter.next()) |grapheme| {
-                                ^
-/Users/jackkilrain/.cache/zig/p/1220de23a3240e503397ea579de4fd85db422f537e10036ef74717c50164475813ce/src/Window.zig:443:22: 0x109a4d14a in printSegment (flow)
-    return self.print(&.{segment}, opts);
-                     ^
-/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:292:39: 0x109a5eb23 in draw (flow)
-            _ = try child.printSegment(.{ .text = line.items, .style = .{
-                                      ^
-/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:100:26: 0x109a614b5 in run (flow)
-            try self.draw();
-                         ^
-/Users/jackkilrain/Desktop/Projects/zig/Flow/src/main.zig:31:16: 0x109a61b85 in main (flow)
-    try app.run();
-               ^
-/usr/local/Cellar/zig/0.13.0/lib/zig/std/start.zig:524:37: 0x109a626ab in main (flow)
-            const result = root.main() catch |err| {
-                                    ^
-???:?:?: 0x7ff80b69c2cc in ??? (???)
-Unwind information for `???:0x7ff80b69c2cc` was not available, trace may be incomplete
+error: Line: 15 Window: 268 Width: 14
 
-???:?:?: 0x0 in ??? (???)
+error: Lines: 1 Row: 0
+error: New col: 1 Line len: 15
+error: Updated col: 1
+error: Line: 15 Window: 268 Width: 14
+
+error: Lines: 1 Row: 0
+error: New col: 2 Line len: 15
+error: Updated col: 2
+error: Line: 15 Window: 268 Width: 14
+
+error: Lines: 1 Row: 0
+error: New col: 3 Line len: 15
+error: Updated col: 3
+error: Line: 15 Window: 268 Width: 14
+
+error: Lines: 1 Row: 0
+error: New col: 4 Line len: 15
+error: Updated col: 4
+error: Line: 15 Window: 268 Width: 14
+
+error: Line: 15 Window: 268 Width: 14
+
+debug(vaxis): total renders = 6
+debug(vaxis): microseconds per render = 1305
+error: UninitialisedWindow
+/Users/jackkilrain/Desktop/Projects/zig/Flow/src/buffer.zig:157:13: 0x10dff3d3a in cursorOffset (flow)
+            return error.UninitialisedWindow;
+            ^
+/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:202:40: 0x10dff36de in handleModeInsert (flow)
+                const offset: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+                                       ^
+/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:261:33: 0x10dff772a in update (flow)
+            .key_press => |key| try switch (self.mode) {
+                                ^
+/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:97:17: 0x10e00e656 in run (flow)
+                try self.update(event);
+                ^
+/Users/jackkilrain/Desktop/Projects/zig/Flow/src/main.zig:31:5: 0x10e00ed89 in main (flow)
+    try app.run();
+    ^

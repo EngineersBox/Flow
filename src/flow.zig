@@ -127,6 +127,7 @@ pub const Flow = struct {
                 const offset_opt: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset_opt) |offset| {
                     try self.buffer.piecetable.insert(offset, &.{@intCast(key.codepoint)});
+                    self.vx.screen.cursor_col += 1;
                 }
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
@@ -207,11 +208,13 @@ pub const Flow = struct {
         }
     }
 
-    inline fn lineTrimNewline(line: []const u8) []const u8 {
-        if (std.mem.eql(u8, line[line.len - 1 ..], "\n")) {
-            return line[0 .. line.len - 1];
+    inline fn lineWidth(line: []const u8, window_width: usize) usize {
+        if (line.len > window_width) {
+            return window_width;
+        } else if (line.len > 1 and std.mem.eql(u8, line[line.len - 1 ..], "\n")) {
+            return line.len - 1;
         }
-        return line;
+        return line.len;
     }
 
     /// Draw our current state
@@ -221,19 +224,26 @@ pub const Flow = struct {
         self.vx.setMouseShape(.default);
         var iterator = try self.buffer.lineIterator();
         var y_offset: usize = 0;
+        var lines_to_free = std.ArrayList(*const std.ArrayList(u8)).init(self.allocator);
+        defer {
+            for (lines_to_free.items) |line| {
+                line.*.deinit();
+            }
+            lines_to_free.deinit();
+        }
         while (try iterator.next()) |line| : (y_offset += 1) {
+            try lines_to_free.append(&line);
             const child = win.child(.{
                 .x_off = 0,
                 .y_off = y_offset,
-                .width = .{ .limit = win.width },
+                .width = .{ .limit = lineWidth(line.items, win.width) },
                 .height = .{ .limit = 1 },
             });
-            _ = try child.printSegment(.{ .text = lineTrimNewline(line.items), .style = .{
+            _ = try child.printSegment(.{ .text = line.items, .style = .{
                 .bg = colours.BLACK,
                 .fg = colours.WHITE,
                 .reverse = false,
             } }, .{});
-            defer line.deinit();
         }
         const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
         defer self.allocator.free(cursor_pos_buffer);

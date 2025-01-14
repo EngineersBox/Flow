@@ -47,6 +47,7 @@ pub const FileBufferIterator = struct {
             try string.append(char);
             if (!std.mem.eql(u8, &.{char}, "\n")) {
                 _ = self.piecetable.get(self.offset + 1) catch {
+                    // Ignores very last newline in buffer
                     continue;
                 };
             }
@@ -62,13 +63,13 @@ pub const FileBufferIterator = struct {
 pub const FileBuffer = struct {
     pub const MaxFileSize: u64 = 1 * 1024 * 1024 * 1024; // 1 GB
 
-    file_buffer: []u8,
+    file_buffer: []const u8,
     piecetable: PieceTable,
     file_path: []const u8,
     allocator: std.mem.Allocator,
     buffer_line_range_indicies: ?Range,
 
-    fn pieceTableFromFile(allocator: std.mem.Allocator, file_path: []const u8) !struct { []u8, PieceTable } {
+    fn pieceTableFromFile(allocator: std.mem.Allocator, file_path: []const u8) !struct { []const u8, PieceTable } {
         const file: std.fs.File = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
         defer file.close();
         const stats = try file.stat();
@@ -95,7 +96,7 @@ pub const FileBuffer = struct {
         self.allocator.free(self.file_buffer);
     }
 
-    pub fn applyBufferWindow(self: *FileBuffer, height: usize) !void {
+    pub fn applyBufferWindow(self: *FileBuffer, height: usize) !bool {
         if (self.buffer_line_range_indicies == null) {
             self.buffer_line_range_indicies = Range{
                 .start = 0,
@@ -107,47 +108,54 @@ pub const FileBuffer = struct {
                 .end = self.buffer_line_range_indicies.?.start,
             };
         }
-        try self.updateBufferWindow(@intCast(height));
+        return try self.updateBufferWindow(@intCast(height));
     }
 
     /// Move the buffer window up or down by a given amount of lines.
     /// A negative move amount will push the window up, whereas a positive
     /// value will move it down
-    pub fn updateBufferWindow(self: *FileBuffer, move_amount: isize) !void {
+    ///
+    /// Returns true of window is in buffer bounds, false otherwise
+    pub fn updateBufferWindow(self: *FileBuffer, move_amount: isize) !bool {
         if (self.buffer_line_range_indicies == null or move_amount == 0) {
-            return;
+            return true;
         }
         const line_direction: isize = std.math.sign(move_amount) + 1;
-        var offset: isize = @intCast(self.buffer_line_range_indicies.?.start);
+        var start_offset: isize = @intCast(self.buffer_line_range_indicies.?.start);
         var total_move = @abs(move_amount);
-        while (total_move > 0) : (offset += line_direction) {
-            const char: u8 = self.piecetable.get(@intCast(offset)) catch {
-                return;
+        while (total_move > 0) : (start_offset += line_direction) {
+            const char: u8 = self.piecetable.get(@intCast(start_offset)) catch {
+                return false;
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
                 total_move -= 1;
-                _ = self.piecetable.get(@intCast(offset + line_direction)) catch {
+                _ = self.piecetable.get(@intCast(start_offset + line_direction)) catch {
                     break;
                 };
             }
         }
-        self.buffer_line_range_indicies.?.start = @intCast(offset);
-        offset = @intCast(self.buffer_line_range_indicies.?.end);
+        var end_offset: isize = @intCast(self.buffer_line_range_indicies.?.end);
         total_move = @abs(move_amount) + 1;
-        while (total_move > 0) : (offset += line_direction) {
-            const char: u8 = self.piecetable.get(@intCast(offset)) catch {
-                return;
+        while (total_move > 0) : (end_offset += line_direction) {
+            const char: u8 = self.piecetable.get(@intCast(end_offset)) catch {
+                return false;
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
                 total_move -= 1;
-                _ = self.piecetable.get(@intCast(offset + line_direction)) catch {
+                _ = self.piecetable.get(@intCast(end_offset + line_direction)) catch {
                     break;
                 };
             }
         }
-        self.buffer_line_range_indicies.?.end = @intCast(offset);
+        // Only apply new window if both start and end bounds are valid
+        self.buffer_line_range_indicies.?.start = @intCast(start_offset);
+        self.buffer_line_range_indicies.?.end = @intCast(end_offset);
+        return true;
     }
-    pub fn cursorOffset(self: *FileBuffer, pos: Position) ?usize {
+    pub fn cursorOffset(self: *FileBuffer, pos: Position) error{UninitialisedWindow}!?usize {
+        if (self.buffer_line_range_indicies == null) {
+            return error.UninitialisedWindow;
+        }
         var line: usize = self.buffer_line_range_indicies.?.start;
         var col: usize = 0;
         var offset: usize = 0;

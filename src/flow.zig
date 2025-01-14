@@ -3,7 +3,10 @@ const vaxis = @import("vaxis");
 const Event = @import("event.zig").Event;
 const colours = @import("colours.zig");
 const nanotime = @import("timer.zig").nanotime;
-const FileBuffer = @import("buffer.zig").FileBuffer;
+const fb = @import("buffer.zig");
+const FileBuffer = fb.FileBuffer;
+const FileBufferIterator = fb.FileBufferIterator;
+const logToFile = @import("log.zig").logToFile;
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
 /// panics occur
@@ -44,6 +47,8 @@ pub const Flow = struct {
     mode: TextMode,
     cursor_blink_ns: u64,
     previous_draw: u64,
+    window_lines: std.ArrayList(*const std.ArrayList(u8)),
+    total_line_count: usize,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
         return .{
@@ -56,6 +61,8 @@ pub const Flow = struct {
             .mode = TextMode.NORMAL,
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
+            .window_lines = std.ArrayList(*const std.ArrayList(u8)).init(allocator),
+            .total_line_count = 0,
         };
     }
 
@@ -63,6 +70,10 @@ pub const Flow = struct {
         self.vx.deinit(self.allocator, self.tty.anyWriter());
         self.tty.deinit();
         self.buffer.deinit();
+        for (self.window_lines.items) |line| {
+            line.deinit();
+        }
+        self.window_lines.deinit();
     }
 
     pub fn run(self: *Flow) !void {
@@ -76,7 +87,8 @@ pub const Flow = struct {
         try self.vx.enterAltScreen(self.tty.anyWriter());
         try self.vx.queryTerminal(self.tty.anyWriter(), 5 * std.time.ns_per_s);
         try self.vx.setMouseMode(self.tty.anyWriter(), true);
-        try self.buffer.applyBufferWindow(self.vx.screen.height);
+        _ = try self.updateBufferWindow(@intCast(self.vx.screen.height));
+        self.total_line_count = self.buffer.file_buffer.len;
         while (!self.should_quit) {
             // pollEvent blocks until we have an event
             loop.pollEvent();
@@ -97,75 +109,115 @@ pub const Flow = struct {
         switch (key.codepoint) {
             'i' => self.mode = TextMode.INSERT,
             'h', vaxis.Key.left => {
-                if (self.vx.screen.cursor_col > 0) {
-                    self.vx.screen.cursor_col -= 1;
-                }
+                try self.shiftCursorCol(-1);
             },
             'j', vaxis.Key.down => {
-                if (self.vx.screen.cursor_row < self.vx.screen.height - 2) {
-                    self.vx.screen.cursor_row += 1;
-                }
+                try self.shiftCursorRow(1);
             },
             'k', vaxis.Key.up => {
-                if (self.vx.screen.cursor_row > 0) {
-                    self.vx.screen.cursor_row -= 1;
-                }
+                try self.shiftCursorRow(1);
             },
             'l', vaxis.Key.right => {
-                if (self.vx.screen.cursor_col < self.vx.screen.width - 1) {
-                    self.vx.screen.cursor_col += 1;
-                }
+                try self.shiftCursorCol(1);
             },
             else => return,
         }
+    }
+
+    fn updateBufferWindow(self: *Flow, offset_row: isize) !bool {
+        for (self.window_lines.items) |line| {
+            line.deinit();
+        }
+        const new_window_valid = try self.buffer.updateBufferWindow(offset_row);
+        var line_iterator = try self.buffer.lineIterator();
+        while (try line_iterator.next()) |line| {
+            try self.window_lines.append(&line);
+        }
+        return new_window_valid;
+    }
+
+    inline fn confineCursorToCurrentLine(self: *Flow) void {
+        self.vx.screen.cursor_col = @min(self.vx.screen.cursor_col, self.window_lines.items[self.vx.screen.cursor_row].items.len);
+    }
+
+    fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
+        const line: *const std.ArrayList(u8) = self.window_lines.items[self.vx.screen.cursor_row];
+        var new_col: isize = @intCast(self.vx.screen.cursor_col);
+        new_col += offset_col;
+        if (new_col >= 0 and new_col < line.*.items.len) {
+            // Within line
+            self.vx.screen.cursor_col = @intCast(new_col);
+            return;
+        }
+        var shift_factor: isize = 1;
+        if (new_col < 0) {
+            shift_factor = -1;
+        }
+        try self.shiftCursorRow(shift_factor);
+    }
+
+    fn shiftCursorRow(self: *Flow, offset_row: isize) !void {
+        var new_row: isize = @intCast(self.vx.screen.cursor_row);
+        new_row += offset_row;
+        if (new_row >= 0 and new_row < self.window_lines.items.len) {
+            // Inside window
+            self.vx.screen.cursor_row = @intCast(new_row);
+            self.confineCursorToCurrentLine();
+            return;
+        }
+        // Outside window
+        if (!try self.updateBufferWindow(offset_row)) {
+            // New window invalid, moved outside buffer bounds
+            return;
+        }
+        self.vx.screen.cursor_row = @intCast(new_row);
+        self.confineCursorToCurrentLine();
     }
 
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF, 0x0A, 0x0D => {
-                const offset_opt: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+                if (key.codepoint == 0x0A or key.codepoint == 0x0D) {
+                    self.total_line_count += 1;
+                }
+                const offset_opt: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset_opt) |offset| {
                     try self.buffer.piecetable.insert(offset, &.{@intCast(key.codepoint)});
-                    self.vx.screen.cursor_col += 1;
+                    try self.shiftCursorCol(1);
                 }
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
-                const offset: ?usize = self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+                const offset: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset == null) {
                     return;
                 } else if (key.codepoint == vaxis.Key.delete) {
                     // Forward delete
                     try self.buffer.piecetable.delete(offset.?, 1);
-                    return;
+                    try self.shiftCursorCol(0);
+                    // TODO: Update total_line_count
                 } else if (self.vx.screen.cursor_col > 0) {
                     // Backward delete
                     try self.buffer.piecetable.delete(offset.? - 1, 1);
+                    try self.shiftCursorCol(-1);
+                    // TODO: Update total_line_count
                 }
             },
             vaxis.Key.left => {
-                if (self.vx.screen.cursor_col > 0) {
-                    self.vx.screen.cursor_col -= 1;
-                }
+                try self.shiftCursorCol(-1);
             },
             vaxis.Key.down => {
-                if (self.vx.screen.cursor_row < self.vx.screen.height - 2) {
-                    self.vx.screen.cursor_row += 1;
-                }
+                try self.shiftCursorRow(1);
             },
             vaxis.Key.up => {
-                if (self.vx.screen.cursor_row > 0) {
-                    self.vx.screen.cursor_row -= 1;
-                }
+                try self.shiftCursorRow(-1);
             },
             vaxis.Key.right => {
-                if (self.vx.screen.cursor_col < self.vx.screen.width - 1) {
-                    // TODO: Check if next char is a newline,
-                    //       if so move to first col in next row
-                    self.vx.screen.cursor_col += 1;
-                }
+                try self.shiftCursorCol(1);
             },
-            else => {},
+            else => {
+                return;
+            },
         }
     }
 
@@ -179,8 +231,9 @@ pub const Flow = struct {
             'q' => self.should_quit = true,
             'w' => {
                 try self.buffer.save();
-                try self.buffer.applyBufferWindow(self.vx.screen.height);
-                try self.buffer.updateBufferWindow(@intCast(self.vx.screen.cursor_row));
+                _ = try self.buffer.applyBufferWindow(self.vx.screen.height);
+                _ = try self.buffer.updateBufferWindow(@intCast(self.vx.screen.cursor_row));
+                self.total_line_count = self.buffer.file_buffer.len;
                 self.mode = TextMode.NORMAL;
             },
             'x' => {
@@ -222,17 +275,7 @@ pub const Flow = struct {
         const win = self.vx.window();
         win.clear();
         self.vx.setMouseShape(.default);
-        var iterator = try self.buffer.lineIterator();
-        var y_offset: usize = 0;
-        var lines_to_free = std.ArrayList(*const std.ArrayList(u8)).init(self.allocator);
-        defer {
-            for (lines_to_free.items) |line| {
-                line.*.deinit();
-            }
-            lines_to_free.deinit();
-        }
-        while (try iterator.next()) |line| : (y_offset += 1) {
-            try lines_to_free.append(&line);
+        for (self.window_lines.items, 0..) |line, y_offset| {
             const child = win.child(.{
                 .x_off = 0,
                 .y_off = y_offset,

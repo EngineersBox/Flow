@@ -1,0 +1,12 @@
+info(vaxis): pixel mouse capability detected
+info(vaxis): unicode capability detected
+info(vaxis): color_scheme_updates capability detected
+info(vaxis): kitty keyboard capability detected
+info(vaxis): kitty graphics capability detected
+debug(vaxis): enabling mouse mode: pixel coordinates
+debug(vaxis): resizing screen: width=268 height=60
+debug(vaxis): resizing screen: width=268 height=60
+Segmentation fault at address 0x0
+???:?:?: 0x10f54fa00 in ___atomic_compare_exchange_16 (???)
+Unwind error at address `flow:0x10f54fa00` (error.InvalidUnwindInfo), trace may be incomplete
+

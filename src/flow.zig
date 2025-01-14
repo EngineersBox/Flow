@@ -8,6 +8,7 @@ const FileBuffer = fb.FileBuffer;
 const FileBufferIterator = fb.FileBufferIterator;
 const Range = fb.Range;
 const logToFile = @import("log.zig").logToFile;
+const TreeSitter = @import("lang.zig").TreeSitter;
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
 /// panics occur
@@ -50,8 +51,11 @@ pub const Flow = struct {
     previous_draw: u64,
     window_lines: std.ArrayList(std.ArrayList(u8)),
     total_line_count: usize,
+    tree_sitter: ?TreeSitter,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
+        var extension = std.fs.path.extension(file_path);
+        extension = std.mem.trimLeft(u8, extension, ".");
         return .{
             .allocator = allocator,
             .should_quit = false,
@@ -64,6 +68,7 @@ pub const Flow = struct {
             .previous_draw = 0,
             .window_lines = std.ArrayList(std.ArrayList(u8)).init(allocator),
             .total_line_count = 0,
+            .tree_sitter = try TreeSitter.initFromFileExtension(extension),
         };
     }
 
@@ -300,24 +305,33 @@ pub const Flow = struct {
         return line.len;
     }
 
+    fn drawLine(self: *Flow, line: []const u8, y_offset: usize, window: vaxis.Window) !void {
+        if (self.tree_sitter == null) {
+            const width = lineWidth(line, window.width);
+            const child = window.child(.{
+                .x_off = 0,
+                .y_off = y_offset,
+                .width = .{ .limit = width },
+                .height = .{ .limit = 1 },
+            });
+            _ = try child.printSegment(.{ .text = line, .style = .{
+                .bg = colours.BLACK,
+                .fg = colours.WHITE,
+                .reverse = false,
+            } }, .{});
+            return;
+        }
+        try self.tree_sitter.?.parseBuffer(line);
+        _ = self.tree_sitter.?.tree.?.rootNode();
+    }
+
     /// Draw our current state
     pub fn draw(self: *Flow) !void {
         const win = self.vx.window();
         win.clear();
         self.vx.setMouseShape(.default);
         for (self.window_lines.items, 0..) |line, y_offset| {
-            const width = lineWidth(line.items, win.width);
-            const child = win.child(.{
-                .x_off = 0,
-                .y_off = y_offset,
-                .width = .{ .limit = width },
-                .height = .{ .limit = 1 },
-            });
-            _ = try child.printSegment(.{ .text = line.items, .style = .{
-                .bg = colours.BLACK,
-                .fg = colours.WHITE,
-                .reverse = false,
-            } }, .{});
+            try self.drawLine(line, y_offset, win);
         }
         const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
         defer self.allocator.free(cursor_pos_buffer);

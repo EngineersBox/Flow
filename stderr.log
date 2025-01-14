@@ -4,11 +4,6 @@ info(vaxis): color_scheme_updates capability detected
 info(vaxis): kitty keyboard capability detected
 info(vaxis): kitty graphics capability detected
 debug(vaxis): enabling mouse mode: pixel coordinates
-error: Line: Hello world!
-
-
-
-error: New window valid
 debug(vaxis): resizing screen: width=268 height=60
 debug(vaxis): resizing screen: width=268 height=60
 error: Line: 15 Window: 268 Width: 14
@@ -18,38 +13,18 @@ error: New col: 1 Line len: 15
 error: Updated col: 1
 error: Line: 15 Window: 268 Width: 14
 
-error: Lines: 1 Row: 0
-error: New col: 2 Line len: 15
-error: Updated col: 2
 error: Line: 15 Window: 268 Width: 14
 
 error: Lines: 1 Row: 0
-error: New col: 3 Line len: 15
-error: Updated col: 3
-error: Line: 15 Window: 268 Width: 14
-
-error: Lines: 1 Row: 0
-error: New col: 4 Line len: 15
-error: Updated col: 4
+error: New col: 0 Line len: 15
+error: Updated col: 0
 error: Line: 15 Window: 268 Width: 14
 
 error: Line: 15 Window: 268 Width: 14
 
-debug(vaxis): total renders = 6
-debug(vaxis): microseconds per render = 1305
-error: UninitialisedWindow
-/Users/jackkilrain/Desktop/Projects/zig/Flow/src/buffer.zig:157:13: 0x10dff3d3a in cursorOffset (flow)
-            return error.UninitialisedWindow;
-            ^
-/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:202:40: 0x10dff36de in handleModeInsert (flow)
-                const offset: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
-                                       ^
-/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:261:33: 0x10dff772a in update (flow)
-            .key_press => |key| try switch (self.mode) {
-                                ^
-/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:97:17: 0x10e00e656 in run (flow)
-                try self.update(event);
-                ^
-/Users/jackkilrain/Desktop/Projects/zig/Flow/src/main.zig:31:5: 0x10e00ed89 in main (flow)
-    try app.run();
-    ^
+error: Line: 15 Window: 268 Width: 14
+
+error: Line: 15 Window: 268 Width: 14
+
+debug(vaxis): total renders = 7
+debug(vaxis): microseconds per render = 1283

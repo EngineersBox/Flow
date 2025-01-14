@@ -6,6 +6,7 @@ const nanotime = @import("timer.zig").nanotime;
 const fb = @import("buffer.zig");
 const FileBuffer = fb.FileBuffer;
 const FileBufferIterator = fb.FileBufferIterator;
+const Range = fb.Range;
 const logToFile = @import("log.zig").logToFile;
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
@@ -87,7 +88,7 @@ pub const Flow = struct {
         try self.vx.enterAltScreen(self.tty.anyWriter());
         try self.vx.queryTerminal(self.tty.anyWriter(), 5 * std.time.ns_per_s);
         try self.vx.setMouseMode(self.tty.anyWriter(), true);
-        _ = try self.updateBufferWindow(@intCast(self.vx.screen.height));
+        try self.setBufferWindow(0, @intCast(self.vx.screen.height));
         self.total_line_count = self.buffer.file_buffer.len;
         while (!self.should_quit) {
             // pollEvent blocks until we have an event
@@ -124,11 +125,24 @@ pub const Flow = struct {
         }
     }
 
+    fn setBufferWindow(self: *Flow, start: usize, height: usize) !void {
+        for (self.window_lines.items) |line| {
+            line.deinit();
+        }
+        self.window_lines.clearAndFree();
+        try self.buffer.setBufferWindow(start, height);
+        var line_iterator = try self.buffer.lineIterator();
+        while (try line_iterator.next()) |line| {
+            try self.window_lines.append(line);
+        }
+    }
+
     fn updateBufferWindow(self: *Flow, offset_row: isize) !bool {
         for (self.window_lines.items) |line| {
             std.log.err("Freeing line: {s}", .{line.items});
             line.deinit();
         }
+        self.window_lines.clearAndFree();
         const new_window_valid = try self.buffer.updateBufferWindow(offset_row);
         var line_iterator = try self.buffer.lineIterator();
         while (try line_iterator.next()) |line| {
@@ -241,9 +255,10 @@ pub const Flow = struct {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             'q' => self.should_quit = true,
             'w' => {
+                const current_buffer_window: Range = self.buffer.buffer_line_range_indicies.?;
                 try self.buffer.save();
-                _ = try self.buffer.applyBufferWindow(self.vx.screen.height);
-                _ = try self.buffer.updateBufferWindow(@intCast(self.vx.screen.cursor_row));
+                _ = try self.updateBufferWindow(0);
+                self.buffer.buffer_line_range_indicies = current_buffer_window;
                 self.total_line_count = self.buffer.file_buffer.len;
                 self.mode = TextMode.NORMAL;
             },

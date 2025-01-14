@@ -115,7 +115,7 @@ pub const Flow = struct {
                 try self.shiftCursorRow(1);
             },
             'k', vaxis.Key.up => {
-                try self.shiftCursorRow(1);
+                try self.shiftCursorRow(-1);
             },
             'l', vaxis.Key.right => {
                 try self.shiftCursorCol(1);
@@ -132,6 +132,7 @@ pub const Flow = struct {
         var line_iterator = try self.buffer.lineIterator();
         while (try line_iterator.next()) |line| {
             try self.window_lines.append(&line);
+            std.log.err("Line: {s}", .{line.items});
         }
         return new_window_valid;
     }
@@ -141,18 +142,24 @@ pub const Flow = struct {
     }
 
     fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
+        std.log.err("Lines: {d} Row: {d}", .{ self.window_lines.items.len, self.vx.screen.cursor_row });
         const line: *const std.ArrayList(u8) = self.window_lines.items[self.vx.screen.cursor_row];
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
         new_col += offset_col;
+        std.log.err("New col: {d} Line len: {d}", .{ new_col, line.*.items.len });
+        // FIXME: The line length is 0, which implies the updateBufferWindow
+        //        call did not create lines correctly
         if (new_col >= 0 and new_col < line.*.items.len) {
             // Within line
             self.vx.screen.cursor_col = @intCast(new_col);
+            std.log.err("Updated col: {d}", .{self.vx.screen.cursor_col});
             return;
         }
         var shift_factor: isize = 1;
         if (new_col < 0) {
             shift_factor = -1;
         }
+        std.log.err("Shift factor: {d}", .{shift_factor});
         try self.shiftCursorRow(shift_factor);
     }
 
@@ -206,14 +213,14 @@ pub const Flow = struct {
             vaxis.Key.left => {
                 try self.shiftCursorCol(-1);
             },
-            vaxis.Key.down => {
-                try self.shiftCursorRow(1);
+            vaxis.Key.right => {
+                try self.shiftCursorCol(1);
             },
             vaxis.Key.up => {
                 try self.shiftCursorRow(-1);
             },
-            vaxis.Key.right => {
-                try self.shiftCursorCol(1);
+            vaxis.Key.down => {
+                try self.shiftCursorRow(1);
             },
             else => {
                 return;

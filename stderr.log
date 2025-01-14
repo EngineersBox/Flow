@@ -4,9 +4,41 @@ info(vaxis): color_scheme_updates capability detected
 info(vaxis): kitty keyboard capability detected
 info(vaxis): kitty graphics capability detected
 debug(vaxis): enabling mouse mode: pixel coordinates
-debug(vaxis): resizing screen: width=268 height=60
-debug(vaxis): resizing screen: width=268 height=60
-Segmentation fault at address 0x0
-???:?:?: 0x10f54fa00 in ___atomic_compare_exchange_16 (???)
-Unwind error at address `flow:0x10f54fa00` (error.InvalidUnwindInfo), trace may be incomplete
+error: Line: Hello world!
 
+
+
+debug(vaxis): resizing screen: width=268 height=60
+debug(vaxis): resizing screen: width=268 height=60
+thread 512602 panic: index out of bounds: index 8176, len 4352
+/Users/jackkilrain/.cache/zig/p/122055beff332830a391e9895c044d33b15ea21063779557024b46169fb1984c6e40/src/GraphemeData.zig:77:48: 0x109aa87e0 in gbp (flow)
+    return @enumFromInt(self.s3[self.s2[self.s1[cp >> 8] + (cp & 0xff)]] >> 4);
+                                               ^
+/Users/jackkilrain/.cache/zig/p/122055beff332830a391e9895c044d33b15ea21063779557024b46169fb1984c6e40/src/grapheme.zig:144:34: 0x109a6fee6 in graphemeBreak (flow)
+    const cp2_gbp_prop = data.gbp(cp2);
+                                 ^
+/Users/jackkilrain/.cache/zig/p/122055beff332830a391e9895c044d33b15ea21063779557024b46169fb1984c6e40/src/grapheme.zig:57:26: 0x109a4c34d in next (flow)
+        if (graphemeBreak(
+                         ^
+/Users/jackkilrain/.cache/zig/p/1220de23a3240e503397ea579de4fd85db422f537e10036ef74717c50164475813ce/src/Window.zig:292:33: 0x109a4aa68 in print (flow)
+                while (iter.next()) |grapheme| {
+                                ^
+/Users/jackkilrain/.cache/zig/p/1220de23a3240e503397ea579de4fd85db422f537e10036ef74717c50164475813ce/src/Window.zig:443:22: 0x109a4d14a in printSegment (flow)
+    return self.print(&.{segment}, opts);
+                     ^
+/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:292:39: 0x109a5eb23 in draw (flow)
+            _ = try child.printSegment(.{ .text = line.items, .style = .{
+                                      ^
+/Users/jackkilrain/Desktop/Projects/zig/Flow/src/flow.zig:100:26: 0x109a614b5 in run (flow)
+            try self.draw();
+                         ^
+/Users/jackkilrain/Desktop/Projects/zig/Flow/src/main.zig:31:16: 0x109a61b85 in main (flow)
+    try app.run();
+               ^
+/usr/local/Cellar/zig/0.13.0/lib/zig/std/start.zig:524:37: 0x109a626ab in main (flow)
+            const result = root.main() catch |err| {
+                                    ^
+???:?:?: 0x7ff80b69c2cc in ??? (???)
+Unwind information for `???:0x7ff80b69c2cc` was not available, trace may be incomplete
+
+???:?:?: 0x0 in ??? (???)

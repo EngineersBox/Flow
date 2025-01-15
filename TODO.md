@@ -4,7 +4,8 @@
 
 * [X] Deleting a character causes PieceTable to segfault, most likely from a bad cursor position
 * [X] Inserting a newline doesn't cause line to split
-* [ ] Newlines not being written to file when saving
+* [X] Newlines not being written to file when saving
+* [ ] Cursor offset is not correctly calculated after altering buffer contents. I.e inserting a newline into the middle of a line
 
 ## Implement
 

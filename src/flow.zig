@@ -203,16 +203,28 @@ pub const Flow = struct {
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
-            vaxis.Key.tab, vaxis.Key.space...0x7E, 0x80...0xFF, 0x0A, 0x0D => {
-                if (key.codepoint == 0x0A or key.codepoint == 0x0D) {
+            vaxis.Key.tab,
+            vaxis.Key.space...0x7E,
+            0x80...0xFF,
+            vaxis.Key.enter,
+            // 0x0A,
+            => {
+                var codepoint: u21 = key.codepoint;
+                if (codepoint == vaxis.Key.enter) {
+                    codepoint = '\n';
                     self.total_line_count += 1;
                 }
                 const offset_opt: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset_opt) |offset| {
-                    try self.buffer.piecetable.insert(offset, &.{@intCast(key.codepoint)});
+                    try self.buffer.piecetable.insert(offset, &.{@intCast(codepoint)});
                     try self.shiftCursorCol(1);
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
+                    if (key.codepoint == vaxis.Key.enter) {
+                        // Move cursor to start of next row
+                        try self.shiftCursorRow(1);
+                        try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
+                    }
                 }
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
@@ -321,7 +333,7 @@ pub const Flow = struct {
             } }, .{});
             return;
         }
-        try self.tree_sitter.?.parseBuffer(line);
+        try self.tree_sitter.?.parseString(line);
         _ = self.tree_sitter.?.tree.?.rootNode();
     }
 
@@ -331,7 +343,7 @@ pub const Flow = struct {
         win.clear();
         self.vx.setMouseShape(.default);
         for (self.window_lines.items, 0..) |line, y_offset| {
-            try self.drawLine(line, y_offset, win);
+            try self.drawLine(line.items, y_offset, win);
         }
         const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
         defer self.allocator.free(cursor_pos_buffer);

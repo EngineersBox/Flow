@@ -40,16 +40,17 @@ pub const FileBufferIterator = struct {
     pub fn next(self: *FileBufferIterator) !?std.ArrayList(u8) {
         var string = std.ArrayList(u8).init(self.allocator);
         errdefer string.deinit();
-        while (self.isFinished()) : (self.offset += 1) {
+        while (self.isFinished()) {
             const char: u8 = self.piecetable.get(self.offset) catch {
                 break;
             };
             try string.append(char);
-            if (!std.mem.eql(u8, &.{char}, "\n")) {
-                _ = self.piecetable.get(self.offset + 1) catch {
-                    // Ignores very last newline in buffer
-                    continue;
-                };
+            // This here here and not in while statement
+            // as it should always be incremented, regardless
+            // of continue or break.
+            self.offset += 1;
+            if (std.mem.eql(u8, &.{char}, "\n")) {
+                break;
             }
         }
         if (string.items.len == 0) {

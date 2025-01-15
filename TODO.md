@@ -3,8 +3,8 @@
 ## Fix
 
 * [X] Deleting a character causes PieceTable to segfault, most likely from a bad cursor position
-* [ ] Newlines not being written to file when saving
 * [X] Inserting a newline doesn't cause line to split
+* [ ] Newlines not being written to file when saving
 
 ## Implement
 

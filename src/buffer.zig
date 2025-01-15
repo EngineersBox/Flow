@@ -73,6 +73,7 @@ pub const FileBuffer = struct {
     piecetable: PieceTable,
     file_path: []const u8,
     allocator: std.mem.Allocator,
+    buffer_offset_range_indicies: ?Range,
     buffer_line_range_indicies: ?Range,
     meta: FileMeta,
 
@@ -89,7 +90,7 @@ pub const FileBuffer = struct {
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !FileBuffer {
         const buf_and_piecetable: struct { []const u8, PieceTable } = try FileBuffer.pieceTableFromFile(allocator, file_path);
-        return .{ .file_buffer = buf_and_piecetable[0], .piecetable = buf_and_piecetable[1], .file_path = file_path, .allocator = allocator, .buffer_line_range_indicies = null, .meta = .{ .lines = std.mem.count(u8, buf_and_piecetable[0], "\n") + 1, .size = buf_and_piecetable[0].len } };
+        return .{ .file_buffer = buf_and_piecetable[0], .piecetable = buf_and_piecetable[1], .file_path = file_path, .allocator = allocator, .buffer_offset_range_indicies = null, .buffer_line_range_indicies = null, .meta = .{ .lines = std.mem.count(u8, buf_and_piecetable[0], "\n") + 1, .size = buf_and_piecetable[0].len } };
     }
 
     pub fn deinit(self: *@This()) void {
@@ -131,27 +132,32 @@ pub const FileBuffer = struct {
     /// Discard existing window and create a new one
     pub fn setBufferWindow(self: *@This(), start: usize, height: usize) error{StartExceedsSize}!void {
         var start_offset: usize = 0;
-        var lines: usize = 0;
-        while (lines < start) : (start_offset += 1) {
+        var start_lines: usize = 0;
+        while (start_lines < start) : (start_offset += 1) {
             const char: u8 = self.piecetable.get(@intCast(start_offset)) catch {
                 return error.StartExceedsSize;
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
-                lines += 1;
+                start_lines += 1;
             }
         }
         var end_offset: usize = start_offset;
-        while (lines < start + height) : (end_offset += 1) {
-            const char: u8 = self.piecetable.get(@intCast(start_offset)) catch {
+        var end_lines: usize = start_lines;
+        while (end_lines < start + height) : (end_offset += 1) {
+            const char: u8 = self.piecetable.get(@intCast(end_offset)) catch {
                 break;
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
-                lines += 1;
+                end_lines += 1;
             }
         }
-        self.buffer_line_range_indicies = Range{
+        self.buffer_offset_range_indicies = Range{
             .start = start_offset,
             .end = end_offset,
+        };
+        self.buffer_line_range_indicies = Range{
+            .start = start_lines,
+            .end = end_lines,
         };
     }
 
@@ -161,39 +167,45 @@ pub const FileBuffer = struct {
     ///
     /// Returns true of window is in buffer bounds, false otherwise
     pub fn updateBufferWindow(self: *@This(), move_amount: isize) !bool {
-        if (self.buffer_line_range_indicies == null or move_amount == 0) {
+        if (self.buffer_offset_range_indicies == null or move_amount == 0) {
             return true;
         }
         const line_direction: isize = std.math.sign(move_amount) + 1;
-        var start_offset: isize = @intCast(self.buffer_line_range_indicies.?.start);
-        var total_move = @abs(move_amount);
-        while (total_move > 0) : (start_offset += line_direction) {
+        var start_offset: isize = @intCast(self.buffer_offset_range_indicies.?.start);
+        var start_total_move = @abs(move_amount);
+        while (start_total_move > 0) : (start_offset += line_direction) {
             const char: u8 = self.piecetable.get(@intCast(start_offset)) catch {
                 return false;
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
-                total_move -= 1;
+                start_total_move -= 1;
                 _ = self.piecetable.get(@intCast(start_offset + line_direction)) catch {
                     break;
                 };
             }
         }
-        var end_offset: isize = @intCast(self.buffer_line_range_indicies.?.end);
-        total_move = @abs(move_amount) + 1;
-        while (total_move > 0) : (end_offset += line_direction) {
+        var end_offset: isize = @intCast(self.buffer_offset_range_indicies.?.end);
+        var end_total_move = @abs(move_amount) + 1;
+        while (end_total_move > 0) : (end_offset += line_direction) {
             const char: u8 = self.piecetable.get(@intCast(end_offset)) catch {
                 return false;
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
-                total_move -= 1;
+                end_total_move -= 1;
                 _ = self.piecetable.get(@intCast(end_offset + line_direction)) catch {
                     break;
                 };
             }
         }
         // Only apply new window if both start and end bounds are valid
-        self.buffer_line_range_indicies.?.start = @intCast(start_offset);
-        self.buffer_line_range_indicies.?.end = @intCast(end_offset);
+        self.buffer_offset_range_indicies.?.start = @intCast(start_offset);
+        self.buffer_offset_range_indicies.?.end = @intCast(end_offset);
+        var start_line: isize = @intCast(self.buffer_line_range_indicies.?.start);
+        start_line += @as(isize, @intCast(start_offset)) * std.math.sign(move_amount);
+        self.buffer_line_range_indicies.?.start = @intCast(start_line);
+        var end_line: isize = @intCast(self.buffer_line_range_indicies.?.end);
+        end_line += @as(isize, @intCast(end_offset)) * std.math.sign(move_amount);
+        self.buffer_line_range_indicies.?.end = @intCast(end_line);
         return true;
     }
 
@@ -219,13 +231,13 @@ pub const FileBuffer = struct {
     }
 
     pub fn cursorOffset(self: *@This(), pos: Position) error{UninitialisedWindow}!?usize {
-        if (self.buffer_line_range_indicies == null) {
+        if (self.buffer_offset_range_indicies == null) {
             return error.UninitialisedWindow;
         }
-        var line: usize = self.buffer_line_range_indicies.?.start;
+        var line: usize = self.buffer_offset_range_indicies.?.start;
         var col: usize = 0;
         var offset: usize = 0;
-        while (line <= self.buffer_line_range_indicies.?.end) : (offset += 1) {
+        while (line <= self.buffer_offset_range_indicies.?.end) : (offset += 1) {
             const char: u8 = self.piecetable.get(offset) catch {
                 break;
             };
@@ -243,14 +255,14 @@ pub const FileBuffer = struct {
     }
 
     pub fn windowLineIterator(self: *@This()) error{UninitialisedWindow}!FileBufferIterator {
-        if (self.buffer_line_range_indicies == null) {
+        if (self.buffer_offset_range_indicies == null) {
             return error.UninitialisedWindow;
         }
         return FileBufferIterator.init(
             self.allocator,
             self.piecetable,
-            self.buffer_line_range_indicies.?.start,
-            self.buffer_line_range_indicies.?.end,
+            self.buffer_offset_range_indicies.?.start,
+            self.buffer_offset_range_indicies.?.end,
         );
     }
 

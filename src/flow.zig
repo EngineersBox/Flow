@@ -171,6 +171,12 @@ pub const Flow = struct {
             // Within line
             self.vx.screen.cursor_col = @intCast(new_col);
             return;
+        } else if (new_col < 0 and self.vx.screen.cursor_row == 0 and self.buffer.buffer_offset_range_indicies.?.start == 0) {
+            // Already at start of buffer, cannot move up
+            return;
+        } else if (new_col >= line.*.items.len and self.buffer.buffer_offset_range_indicies.?.end == self.buffer.meta.size - 1) {
+            // Already at end of buffer, cannot move down
+            return;
         }
         var shift_factor: isize = 1;
         if (new_col < 0) {
@@ -199,32 +205,39 @@ pub const Flow = struct {
 
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
+            vaxis.Key.enter => {
+                const offset_opt: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+                if (offset_opt) |offset| {
+                    std.log.err("Delete offset: {d}", .{offset});
+                    try self.buffer.insert(offset, &.{'\n'});
+                    self.clearWindowLines();
+                    _ = try self.cacheWindowLines();
+                    // Move cursor to start of next row
+                    try self.shiftCursorRow(1);
+                    try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
+                }
+            },
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             vaxis.Key.tab,
             vaxis.Key.space...0x7E,
             0x80...0xFF,
-            vaxis.Key.enter,
             => {
-                var codepoint: u21 = key.codepoint;
-                if (codepoint == vaxis.Key.enter) {
-                    codepoint = '\n';
-                }
                 const offset_opt: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset_opt) |offset| {
-                    try self.buffer.insert(offset, &.{@intCast(codepoint)});
+                    try self.buffer.insert(offset, &.{@intCast(key.codepoint)});
                     try self.shiftCursorCol(1);
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
-                    if (key.codepoint == vaxis.Key.enter) {
-                        // Move cursor to start of next row
-                        try self.shiftCursorRow(1);
-                        try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
-                    }
                 }
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
+                std.log.err("Line: {d} Col: {d}", .{
+                    self.vx.screen.cursor_row,
+                    self.vx.screen.cursor_col,
+                });
                 const offset: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset == null) {
+                    std.log.err("Invalid offset", .{});
                     return;
                 } else if (key.codepoint == vaxis.Key.delete) {
                     // Forward delete
@@ -232,7 +245,7 @@ pub const Flow = struct {
                     try self.shiftCursorCol(0);
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
-                } else if (self.vx.screen.cursor_col > 0) {
+                } else {
                     // Backward delete
                     try self.buffer.delete(offset.? - 1, 1);
                     try self.shiftCursorCol(-1);
@@ -267,12 +280,12 @@ pub const Flow = struct {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             'q' => self.should_quit = true,
             'w' => {
-                const current_buffer_window: Range = self.buffer.buffer_line_range_indicies.?;
+                const current_buffer_window: Range = self.buffer.buffer_offset_range_indicies.?;
                 // Pre-clear to avoid having two entire copies of the lines in the window
                 self.clearWindowLines();
                 try self.buffer.save();
                 _ = try self.updateBufferWindow(0);
-                self.buffer.buffer_line_range_indicies = current_buffer_window;
+                self.buffer.buffer_offset_range_indicies = current_buffer_window;
                 self.mode = TextMode.NORMAL;
             },
             'x' => {
@@ -295,6 +308,7 @@ pub const Flow = struct {
             .mouse => |mouse| self.mouse = mouse,
             .winsize => |ws| {
                 try self.vx.resize(self.allocator, self.tty.anyWriter(), ws);
+                try self.buffer.setBufferWindow(self.buffer.buffer_line_range_indicies.?.start, ws.rows);
             },
             else => {},
         }

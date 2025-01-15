@@ -38,6 +38,8 @@ pub const TextMode = enum(u2) {
     }
 };
 
+const ClampMode = enum(u2) { NONE = 0, START = 1, END = 2 };
+
 /// The application state
 pub const Flow = struct {
     allocator: std.mem.Allocator,
@@ -51,6 +53,7 @@ pub const Flow = struct {
     previous_draw: u64,
     window_lines: std.ArrayList(std.ArrayList(u8)),
     tree_sitter: ?TreeSitter,
+    cursor_offset: usize,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
         var extension: []const u8 = std.fs.path.extension(file_path);
@@ -67,6 +70,7 @@ pub const Flow = struct {
             .previous_draw = 0,
             .window_lines = std.ArrayList(std.ArrayList(u8)).init(allocator),
             .tree_sitter = try TreeSitter.initFromFileExtension(extension),
+            .cursor_offset = 0,
         };
     }
 
@@ -115,10 +119,10 @@ pub const Flow = struct {
                 try self.shiftCursorCol(-1);
             },
             'j', vaxis.Key.down => {
-                try self.shiftCursorRow(1);
+                try self.shiftCursorRow(1, ClampMode.NONE);
             },
             'k', vaxis.Key.up => {
-                try self.shiftCursorRow(-1);
+                try self.shiftCursorRow(-1, ClampMode.NONE);
             },
             'l', vaxis.Key.right => {
                 try self.shiftCursorCol(1);
@@ -159,8 +163,21 @@ pub const Flow = struct {
         return true;
     }
 
-    inline fn confineCursorToCurrentLine(self: *Flow) void {
-        self.vx.screen.cursor_col = @min(self.vx.screen.cursor_col, self.window_lines.items[self.vx.screen.cursor_row].items.len);
+    inline fn confineCursorToCurrentLine(self: *Flow, clamp: ClampMode) void {
+        switch (clamp) {
+            .NONE => {
+                self.vx.screen.cursor_col = @min(
+                    self.vx.screen.cursor_col,
+                    self.window_lines.items[self.vx.screen.cursor_row].items.len - 1,
+                );
+            },
+            .START => {
+                self.vx.screen.cursor_col = 0;
+            },
+            .END => {
+                self.vx.screen.cursor_col = self.window_lines.items[self.vx.screen.cursor_row].items.len - 1;
+            },
+        }
     }
 
     fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
@@ -169,7 +186,9 @@ pub const Flow = struct {
         new_col += offset_col;
         if (new_col >= 0 and new_col < line.*.items.len) {
             // Within line
+            const col_diff: isize = new_col - @as(isize, @intCast(self.vx.screen.cursor_col));
             self.vx.screen.cursor_col = @intCast(new_col);
+            self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + col_diff);
             return;
         } else if (new_col < 0 and self.vx.screen.cursor_row == 0 and self.buffer.buffer_offset_range_indicies.?.start == 0) {
             // Already at start of buffer, cannot move up
@@ -179,19 +198,45 @@ pub const Flow = struct {
             return;
         }
         var shift_factor: isize = 1;
+        var clamp: ClampMode = ClampMode.START;
+        // Set to min or max to ensure that shiftCursorRow clamps
+        // column to start or end of next line
         if (new_col < 0) {
             shift_factor = -1;
+            clamp = ClampMode.END;
+        } else if (new_col == 0) {
+            clamp = ClampMode.NONE;
         }
-        try self.shiftCursorRow(shift_factor);
+        const col_diff: isize = new_col - @as(isize, @intCast(self.vx.screen.cursor_col));
+        self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + col_diff);
+        try self.shiftCursorRow(
+            shift_factor,
+            clamp,
+        );
     }
 
-    fn shiftCursorRow(self: *Flow, offset_row: isize) !void {
+    fn adjustCursorOffset(self: *Flow, prev_row: usize, prev_col: usize) void {
+        const new_row = self.vx.screen.cursor_row;
+        const new_col = self.vx.screen.cursor_col;
+        const new_row_len = self.window_lines.items[new_row].items.len;
+        const prev_row_len = self.window_lines.items[prev_row].items.len;
+        if (new_row > prev_row) {
+            self.cursor_offset += (prev_row_len - prev_col) + new_col + 1;
+            return;
+        }
+        self.cursor_offset -= prev_col + 1 + (new_row_len - new_col);
+    }
+
+    fn shiftCursorRow(self: *Flow, offset_row: isize, clamp: ClampMode) !void {
         var new_row: isize = @intCast(self.vx.screen.cursor_row);
         new_row += offset_row;
         if (new_row >= 0 and new_row < self.window_lines.items.len) {
             // Inside window
+            const prev_row = self.vx.screen.cursor_row;
+            const prev_col = self.vx.screen.cursor_col;
             self.vx.screen.cursor_row = @intCast(new_row);
-            self.confineCursorToCurrentLine();
+            self.confineCursorToCurrentLine(clamp);
+            self.adjustCursorOffset(prev_row, prev_col);
             return;
         }
         // Outside window
@@ -199,55 +244,43 @@ pub const Flow = struct {
             // New window invalid, moved outside buffer bounds
             return;
         }
+        const prev_row = self.vx.screen.cursor_row;
+        const prev_col = self.vx.screen.cursor_col;
         self.vx.screen.cursor_row = @intCast(new_row);
-        self.confineCursorToCurrentLine();
+        self.confineCursorToCurrentLine(clamp);
+        self.adjustCursorOffset(prev_row, prev_col);
     }
 
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.enter => {
-                const offset_opt: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
-                if (offset_opt) |offset| {
-                    std.log.err("Delete offset: {d}", .{offset});
-                    try self.buffer.insert(offset, &.{'\n'});
-                    self.clearWindowLines();
-                    _ = try self.cacheWindowLines();
-                    // Move cursor to start of next row
-                    try self.shiftCursorRow(1);
-                    try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
-                }
+                try self.buffer.insert(self.cursor_offset, &.{'\n'});
+                self.clearWindowLines();
+                _ = try self.cacheWindowLines();
+                // Move cursor to start of next row
+                try self.shiftCursorRow(1, ClampMode.NONE);
+                try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
             },
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             vaxis.Key.tab,
             vaxis.Key.space...0x7E,
             0x80...0xFF,
             => {
-                const offset_opt: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
-                if (offset_opt) |offset| {
-                    try self.buffer.insert(offset, &.{@intCast(key.codepoint)});
-                    try self.shiftCursorCol(1);
-                    self.clearWindowLines();
-                    _ = try self.cacheWindowLines();
-                }
+                try self.buffer.insert(self.cursor_offset, &.{@intCast(key.codepoint)});
+                try self.shiftCursorCol(1);
+                self.clearWindowLines();
+                _ = try self.cacheWindowLines();
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
-                std.log.err("Line: {d} Col: {d}", .{
-                    self.vx.screen.cursor_row,
-                    self.vx.screen.cursor_col,
-                });
-                const offset: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
-                if (offset == null) {
-                    std.log.err("Invalid offset", .{});
-                    return;
-                } else if (key.codepoint == vaxis.Key.delete) {
+                if (key.codepoint == vaxis.Key.delete and self.cursor_offset < self.buffer.meta.size - 1) {
                     // Forward delete
-                    try self.buffer.delete(offset.?, 1);
+                    try self.buffer.delete(self.cursor_offset, 1);
                     try self.shiftCursorCol(0);
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
-                } else {
+                } else if (key.codepoint == vaxis.Key.backspace and self.cursor_offset > 0) {
                     // Backward delete
-                    try self.buffer.delete(offset.? - 1, 1);
+                    try self.buffer.delete(self.cursor_offset - 1, 1);
                     try self.shiftCursorCol(-1);
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
@@ -260,10 +293,10 @@ pub const Flow = struct {
                 try self.shiftCursorCol(1);
             },
             vaxis.Key.up => {
-                try self.shiftCursorRow(-1);
+                try self.shiftCursorRow(-1, ClampMode.NONE);
             },
             vaxis.Key.down => {
-                try self.shiftCursorRow(1);
+                try self.shiftCursorRow(1, ClampMode.NONE);
             },
             else => {
                 return;
@@ -280,12 +313,13 @@ pub const Flow = struct {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             'q' => self.should_quit = true,
             'w' => {
-                const current_buffer_window: Range = self.buffer.buffer_offset_range_indicies.?;
+                const current_offset_range: Range = self.buffer.buffer_offset_range_indicies.?;
+                const current_index_range: Range = self.buffer.buffer_line_range_indicies.?;
                 // Pre-clear to avoid having two entire copies of the lines in the window
                 self.clearWindowLines();
                 try self.buffer.save();
-                _ = try self.updateBufferWindow(0);
-                self.buffer.buffer_offset_range_indicies = current_buffer_window;
+                self.buffer.buffer_offset_range_indicies = current_offset_range;
+                self.buffer.buffer_offset_range_indicies = current_index_range;
                 self.mode = TextMode.NORMAL;
             },
             'x' => {
@@ -309,6 +343,12 @@ pub const Flow = struct {
             .winsize => |ws| {
                 try self.vx.resize(self.allocator, self.tty.anyWriter(), ws);
                 try self.buffer.setBufferWindow(self.buffer.buffer_line_range_indicies.?.start, ws.rows);
+                const offset_opt: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
+                if (offset_opt) |offset| {
+                    self.cursor_offset = offset;
+                } else {
+                    return error.OutOfBounds;
+                }
             },
             else => {},
         }

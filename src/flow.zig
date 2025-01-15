@@ -50,11 +50,10 @@ pub const Flow = struct {
     cursor_blink_ns: u64,
     previous_draw: u64,
     window_lines: std.ArrayList(std.ArrayList(u8)),
-    total_line_count: usize,
     tree_sitter: ?TreeSitter,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
-        var extension = std.fs.path.extension(file_path);
+        var extension: []const u8 = std.fs.path.extension(file_path);
         extension = std.mem.trimLeft(u8, extension, ".");
         return .{
             .allocator = allocator,
@@ -67,7 +66,6 @@ pub const Flow = struct {
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
             .window_lines = std.ArrayList(std.ArrayList(u8)).init(allocator),
-            .total_line_count = 0,
             .tree_sitter = try TreeSitter.initFromFileExtension(extension),
         };
     }
@@ -94,7 +92,6 @@ pub const Flow = struct {
         try self.vx.queryTerminal(self.tty.anyWriter(), 5 * std.time.ns_per_s);
         try self.vx.setMouseMode(self.tty.anyWriter(), true);
         try self.setBufferWindow(0, @intCast(self.vx.screen.height));
-        self.total_line_count = self.buffer.file_buffer.len;
         while (!self.should_quit) {
             // pollEvent blocks until we have an event
             loop.pollEvent();
@@ -138,7 +135,7 @@ pub const Flow = struct {
 
     fn updateBufferWindow(self: *Flow, offset_row: isize) !bool {
         self.clearWindowLines();
-        const new_window_valid = try self.buffer.updateBufferWindow(offset_row);
+        const new_window_valid: bool = try self.buffer.updateBufferWindow(offset_row);
         _ = try self.cacheWindowLines();
         return new_window_valid;
     }
@@ -155,7 +152,7 @@ pub const Flow = struct {
         if (self.window_lines.items.len != 0) {
             return false;
         }
-        var line_iterator = try self.buffer.lineIterator();
+        var line_iterator: FileBufferIterator = try self.buffer.lineIterator();
         while (try line_iterator.next()) |line| {
             try self.window_lines.append(line);
         }
@@ -207,16 +204,14 @@ pub const Flow = struct {
             vaxis.Key.space...0x7E,
             0x80...0xFF,
             vaxis.Key.enter,
-            // 0x0A,
             => {
                 var codepoint: u21 = key.codepoint;
                 if (codepoint == vaxis.Key.enter) {
                     codepoint = '\n';
-                    self.total_line_count += 1;
                 }
                 const offset_opt: ?usize = try self.buffer.cursorOffset(.{ .line = self.vx.screen.cursor_row, .col = self.vx.screen.cursor_col });
                 if (offset_opt) |offset| {
-                    try self.buffer.piecetable.insert(offset, &.{@intCast(codepoint)});
+                    try self.buffer.insert(offset, &.{@intCast(codepoint)});
                     try self.shiftCursorCol(1);
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
@@ -233,18 +228,16 @@ pub const Flow = struct {
                     return;
                 } else if (key.codepoint == vaxis.Key.delete) {
                     // Forward delete
-                    try self.buffer.piecetable.delete(offset.?, 1);
+                    try self.buffer.delete(offset.?, 1);
                     try self.shiftCursorCol(0);
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
-                    // TODO: Update total_line_count
                 } else if (self.vx.screen.cursor_col > 0) {
                     // Backward delete
-                    try self.buffer.piecetable.delete(offset.? - 1, 1);
+                    try self.buffer.delete(offset.? - 1, 1);
                     try self.shiftCursorCol(-1);
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
-                    // TODO: Update total_line_count
                 }
             },
             vaxis.Key.left => {
@@ -280,7 +273,6 @@ pub const Flow = struct {
                 try self.buffer.save();
                 _ = try self.updateBufferWindow(0);
                 self.buffer.buffer_line_range_indicies = current_buffer_window;
-                self.total_line_count = self.buffer.file_buffer.len;
                 self.mode = TextMode.NORMAL;
             },
             'x' => {
@@ -319,8 +311,8 @@ pub const Flow = struct {
 
     fn drawLine(self: *Flow, line: []const u8, y_offset: usize, window: vaxis.Window) !void {
         if (self.tree_sitter == null) {
-            const width = lineWidth(line, window.width);
-            const child = window.child(.{
+            const width: usize = lineWidth(line, window.width);
+            const child: vaxis.Window = window.child(.{
                 .x_off = 0,
                 .y_off = y_offset,
                 .width = .{ .limit = width },
@@ -339,22 +331,22 @@ pub const Flow = struct {
 
     /// Draw our current state
     pub fn draw(self: *Flow) !void {
-        const win = self.vx.window();
-        win.clear();
+        const window: vaxis.Window = self.vx.window();
+        window.clear();
         self.vx.setMouseShape(.default);
         for (self.window_lines.items, 0..) |line, y_offset| {
-            try self.drawLine(line.items, y_offset, win);
+            try self.drawLine(line.items, y_offset, window);
         }
         const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
         defer self.allocator.free(cursor_pos_buffer);
-        const status_bar = win.child(.{
-            .x_off = win.width - cursor_pos_buffer.len - 1,
-            .y_off = win.height - 1,
+        const status_bar = window.child(.{
+            .x_off = window.width - cursor_pos_buffer.len - 1,
+            .y_off = window.height - 1,
             .width = .{ .limit = cursor_pos_buffer.len },
             .height = .{ .limit = 1 },
         });
         _ = try status_bar.printSegment(.{ .text = cursor_pos_buffer, .style = .{} }, .{});
-        const cursor = win.child(.{
+        const cursor: vaxis.Window = window.child(.{
             .x_off = self.vx.screen.cursor_col,
             .y_off = self.vx.screen.cursor_row,
             .width = .{
@@ -364,7 +356,7 @@ pub const Flow = struct {
                 .limit = 1,
             },
         });
-        const cursor_index = (self.vx.screen.cursor_row * win.width) + self.vx.screen.cursor_col;
+        const cursor_index: usize = (self.vx.screen.cursor_row * window.width) + self.vx.screen.cursor_col;
         const cursor_value: u8 = self.buffer.piecetable.get(cursor_index) catch ' ';
         _ = try cursor.printSegment(.{ .text = &.{cursor_value}, .style = .{ .reverse = true } }, .{});
         const mode_string = switch (self.mode) {
@@ -373,9 +365,9 @@ pub const Flow = struct {
             TextMode.VISUAL => " VISUAL ",
             TextMode.COMMAND => " COMMAND ",
         };
-        const text_mode = win.child(.{
+        const text_mode: vaxis.Window = window.child(.{
             .x_off = 0,
-            .y_off = win.height - 1,
+            .y_off = window.height - 1,
             .width = .{ .limit = 9 },
             .height = .{ .limit = 1 },
         });
@@ -383,7 +375,7 @@ pub const Flow = struct {
         self.previous_draw = nanotime();
         // It's best to use a buffered writer for the render method. TTY provides one, but you
         // may use your own. The provided bufferedWriter has a buffer size of 4096
-        var buffered = self.tty.bufferedWriter();
+        var buffered: std.io.BufferedWriter(4096, std.io.AnyWriter) = self.tty.bufferedWriter();
         // Render the application to the screen
         try self.vx.render(buffered.writer().any());
         try buffered.flush();

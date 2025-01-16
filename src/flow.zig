@@ -9,6 +9,7 @@ const FileBufferIterator = fb.FileBufferIterator;
 const Range = fb.Range;
 const logToFile = @import("log.zig").logToFile;
 const TreeSitter = @import("lang.zig").TreeSitter;
+const Config = @import("config.zig");
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
 /// panics occur
@@ -43,6 +44,8 @@ const ClampMode = enum(u2) { NONE = 0, START = 1, END = 2 };
 /// The application state
 pub const Flow = struct {
     allocator: std.mem.Allocator,
+    config: Config,
+    tab_spaces_buffer: []u8,
     should_quit: bool,
     tty: vaxis.Tty,
     vx: vaxis.Vaxis,
@@ -58,8 +61,13 @@ pub const Flow = struct {
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
         var extension: []const u8 = std.fs.path.extension(file_path);
         extension = std.mem.trimLeft(u8, extension, ".");
+        const config = Config.default;
+        const tab_spaces_buffer = try allocator.alloc(u8, config.spaces_per_tab);
+        @memset(tab_spaces_buffer, @as(u8, @intCast(' ')));
         return .{
             .allocator = allocator,
+            .config = config,
+            .tab_spaces_buffer = tab_spaces_buffer,
             .should_quit = false,
             .tty = try vaxis.Tty.init(),
             .vx = try vaxis.init(allocator, .{}),
@@ -82,6 +90,7 @@ pub const Flow = struct {
             line.deinit();
         }
         self.window_lines.deinit();
+        self.allocator.free(self.tab_spaces_buffer);
     }
 
     pub fn run(self: *Flow) !void {
@@ -182,6 +191,7 @@ pub const Flow = struct {
 
     fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
         const line: *const std.ArrayList(u8) = &self.window_lines.items[self.vx.screen.cursor_row];
+        const last_char: u8 = line.getLast();
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
         new_col += offset_col;
         if (new_col >= 0 and new_col < line.*.items.len) {
@@ -189,7 +199,10 @@ pub const Flow = struct {
             const col_diff: isize = new_col - @as(isize, @intCast(self.vx.screen.cursor_col));
             self.vx.screen.cursor_col = @intCast(new_col);
             self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + col_diff);
-            return;
+            if (new_col != line.*.items.len - 1 or last_char != '\n') {
+                return;
+            }
+            // Column is a newline, skip over it to next row
         } else if (new_col < 0 and self.vx.screen.cursor_row == 0 and self.buffer.buffer_offset_range_indicies.?.start == 0) {
             // Already at start of buffer, cannot move up
             return;
@@ -221,10 +234,10 @@ pub const Flow = struct {
         const new_row_len = self.window_lines.items[new_row].items.len;
         const prev_row_len = self.window_lines.items[prev_row].items.len;
         if (new_row > prev_row) {
-            self.cursor_offset += (prev_row_len - prev_col) + new_col + 1;
+            self.cursor_offset += (prev_row_len - prev_col) + new_col;
             return;
         }
-        self.cursor_offset -= prev_col + 1 + (new_row_len - new_col);
+        self.cursor_offset -= prev_col + (new_row_len - new_col);
     }
 
     fn shiftCursorRow(self: *Flow, offset_row: isize, clamp: ClampMode) !void {
@@ -262,7 +275,6 @@ pub const Flow = struct {
                 try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
             },
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
-            vaxis.Key.tab,
             vaxis.Key.space...0x7E,
             0x80...0xFF,
             => {
@@ -270,6 +282,12 @@ pub const Flow = struct {
                 try self.shiftCursorCol(1);
                 self.clearWindowLines();
                 _ = try self.cacheWindowLines();
+            },
+            vaxis.Key.tab => {
+                try self.buffer.insert(self.cursor_offset, self.tab_spaces_buffer);
+                self.clearWindowLines();
+                _ = try self.cacheWindowLines();
+                try self.shiftCursorCol(@intCast(self.config.spaces_per_tab));
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
                 if (key.codepoint == vaxis.Key.delete and self.cursor_offset < self.buffer.meta.size - 1) {
@@ -410,8 +428,7 @@ pub const Flow = struct {
                 .limit = 1,
             },
         });
-        const cursor_index: usize = (self.vx.screen.cursor_row * window.width) + self.vx.screen.cursor_col;
-        const cursor_value: u8 = self.buffer.piecetable.get(cursor_index) catch ' ';
+        const cursor_value: u8 = self.buffer.piecetable.get(self.cursor_offset) catch ' ';
         _ = try cursor.printSegment(.{ .text = &.{cursor_value}, .style = .{ .reverse = true } }, .{});
         const mode_string = switch (self.mode) {
             TextMode.NORMAL => " NORMAL ",

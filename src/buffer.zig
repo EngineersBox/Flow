@@ -126,7 +126,7 @@ pub const FileBuffer = struct {
         }
         try self.piecetable.delete(index, length);
         self.meta.lines -= lines;
-        self.meta.size -= index + length;
+        self.meta.size -= length;
     }
 
     /// Discard existing window and create a new one

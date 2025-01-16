@@ -181,21 +181,21 @@ pub const Flow = struct {
             .NONE => {
                 self.vx.screen.cursor_col = @min(
                     self.vx.screen.cursor_col,
-                    self.window_lines.items[self.vx.screen.cursor_row].items.len - 1,
+                    self.window_lines.items[self.vx.screen.cursor_row].items.len -| 2,
                 );
             },
             .START => {
                 self.vx.screen.cursor_col = 0;
             },
             .END => {
-                self.vx.screen.cursor_col = self.window_lines.items[self.vx.screen.cursor_row].items.len - 2;
+                self.vx.screen.cursor_col = self.window_lines.items[self.vx.screen.cursor_row].items.len -| 2;
                 std.log.err("Confined col: {d} row: {d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
             },
         }
     }
 
     fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
-        const line: *const std.ArrayList(u8) = &self.window_lines.items[self.vx.screen.cursor_row];
+        const line: *const std.ArrayList(u8) = self.getCurrentLine();
         const last_char: u8 = line.getLast();
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
         new_col += offset_col;
@@ -225,8 +225,6 @@ pub const Flow = struct {
         } else if (new_col == 0) {
             clamp = ClampMode.NONE;
         }
-        const col_diff: isize = new_col - @as(isize, @intCast(self.vx.screen.cursor_col));
-        self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + col_diff);
         std.log.err("Current col: {d} row: {d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
         try self.shiftCursorRow(
             shift_factor,

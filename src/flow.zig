@@ -172,6 +172,10 @@ pub const Flow = struct {
         return true;
     }
 
+    inline fn getCurrentLine(self: *Flow) *std.ArrayList(u8) {
+        return @as(*std.ArrayList(u8), &self.window_lines.items[self.vx.screen.cursor_row]);
+    }
+
     inline fn confineCursorToCurrentLine(self: *Flow, clamp: ClampMode) void {
         switch (clamp) {
             .NONE => {
@@ -184,7 +188,8 @@ pub const Flow = struct {
                 self.vx.screen.cursor_col = 0;
             },
             .END => {
-                self.vx.screen.cursor_col = self.window_lines.items[self.vx.screen.cursor_row].items.len - 1;
+                self.vx.screen.cursor_col = self.window_lines.items[self.vx.screen.cursor_row].items.len - 2;
+                std.log.err("Confined col: {d} row: {d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
             },
         }
     }
@@ -222,6 +227,7 @@ pub const Flow = struct {
         }
         const col_diff: isize = new_col - @as(isize, @intCast(self.vx.screen.cursor_col));
         self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + col_diff);
+        std.log.err("Current col: {d} row: {d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
         try self.shiftCursorRow(
             shift_factor,
             clamp,
@@ -274,34 +280,35 @@ pub const Flow = struct {
                 try self.shiftCursorRow(1, ClampMode.NONE);
                 try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
             },
-            vaxis.Key.escape => self.mode = TextMode.NORMAL,
             vaxis.Key.space...0x7E,
             0x80...0xFF,
             => {
                 try self.buffer.insert(self.cursor_offset, &.{@intCast(key.codepoint)});
+                const line = self.getCurrentLine();
+                try line.insert(self.vx.screen.cursor_col, @intCast(key.codepoint));
                 try self.shiftCursorCol(1);
-                self.clearWindowLines();
-                _ = try self.cacheWindowLines();
+                // self.clearWindowLines();
+                // _ = try self.cacheWindowLines();
             },
             vaxis.Key.tab => {
                 try self.buffer.insert(self.cursor_offset, self.tab_spaces_buffer);
-                self.clearWindowLines();
-                _ = try self.cacheWindowLines();
+                const line = self.getCurrentLine();
+                try line.insertSlice(self.vx.screen.cursor_col, self.tab_spaces_buffer);
                 try self.shiftCursorCol(@intCast(self.config.spaces_per_tab));
             },
             vaxis.Key.delete, vaxis.Key.backspace => {
                 if (key.codepoint == vaxis.Key.delete and self.cursor_offset < self.buffer.meta.size - 1) {
                     // Forward delete
                     try self.buffer.delete(self.cursor_offset, 1);
+                    const line = self.getCurrentLine();
+                    _ = line.orderedRemove(self.vx.screen.cursor_col);
                     try self.shiftCursorCol(0);
-                    self.clearWindowLines();
-                    _ = try self.cacheWindowLines();
                 } else if (key.codepoint == vaxis.Key.backspace and self.cursor_offset > 0) {
                     // Backward delete
                     try self.buffer.delete(self.cursor_offset - 1, 1);
+                    const line = self.getCurrentLine();
+                    _ = line.orderedRemove(self.vx.screen.cursor_col - 1);
                     try self.shiftCursorCol(-1);
-                    self.clearWindowLines();
-                    _ = try self.cacheWindowLines();
                 }
             },
             vaxis.Key.left => {
@@ -316,6 +323,7 @@ pub const Flow = struct {
             vaxis.Key.down => {
                 try self.shiftCursorRow(1, ClampMode.NONE);
             },
+            vaxis.Key.escape => self.mode = TextMode.NORMAL,
             else => {
                 return;
             },

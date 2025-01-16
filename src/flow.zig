@@ -301,13 +301,29 @@ pub const Flow = struct {
                     // Forward delete
                     try self.buffer.delete(self.cursor_offset, 1);
                     const line = self.getCurrentLine();
-                    _ = line.orderedRemove(self.vx.screen.cursor_col);
+                    if (self.vx.screen.cursor_col < line.items.len - 1) {
+                        _ = line.orderedRemove(self.vx.screen.cursor_col);
+                    } else {
+                        // At end of line, which will merge this line with
+                        // then ext. Thus it is easier to just regen window
+                        // lines cache
+                        self.clearWindowLines();
+                        _ = try self.cacheWindowLines();
+                    }
                     try self.shiftCursorCol(0);
                 } else if (key.codepoint == vaxis.Key.backspace and self.cursor_offset > 0) {
                     // Backward delete
                     try self.buffer.delete(self.cursor_offset - 1, 1);
                     const line = self.getCurrentLine();
-                    _ = line.orderedRemove(self.vx.screen.cursor_col - 1);
+                    if (self.vx.screen.cursor_col > 0) {
+                        _ = line.orderedRemove(self.vx.screen.cursor_col - 1);
+                    } else {
+                        // At start of line, which will merge this line with
+                        // the previous. Thus it is easier to just regen window
+                        // lines cache
+                        self.clearWindowLines();
+                        _ = try self.cacheWindowLines();
+                    }
                     try self.shiftCursorCol(-1);
                 }
             },

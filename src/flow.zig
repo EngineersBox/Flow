@@ -209,13 +209,8 @@ pub const Flow = struct {
             TextMode.INSERT => blk: {
                 if (line.items.len == 0) {
                     break :blk 0;
-                } else if (line.items.len == 1) {
-                    if (line.items[0] == '\n') {
-                        break :blk line.items.len -| 1;
-                    }
-                    break :blk line.items.len;
                 }
-                break :blk line.items.len;
+                break :blk line.items.len -| @intFromBool(line.items[0] == '\n');
             },
             else => line.items.len -| 1,
         };
@@ -223,11 +218,13 @@ pub const Flow = struct {
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
         new_col += offset_col;
         std.log.err("New col: {d} Line end: {d}", .{ new_col, current_line_end });
+        std.log.err("Cursor offset: {d}", .{self.cursor_offset});
+        std.log.err("Range end: {d} Meta size: {d}", .{ self.buffer.buffer_offset_range_indicies.?.end, self.buffer.meta.size });
         if (new_col >= 0 and new_col <= current_line_end) {
             // Within line
             self.vx.screen.cursor_col = @intCast(new_col);
             self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + offset_col);
-            if (new_col != current_line_end or last_char != '\n' or self.cursor_offset == self.buffer.meta.size) {
+            if (new_col != current_line_end or last_char != '\n' or self.cursor_offset == self.buffer.meta.size - 1) {
                 return;
             }
             // Column is a newline, skip over it to next row
@@ -297,12 +294,14 @@ pub const Flow = struct {
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.enter => {
+                std.log.err("Line count before: {d}", .{self.window_lines.items.len});
                 try self.buffer.insert(self.cursor_offset, &.{'\n'});
                 self.clearWindowLines();
                 _ = try self.cacheWindowLines();
+                std.log.err("Line count after: {d}", .{self.window_lines.items.len});
                 // Move cursor to start of next row
-                try self.shiftCursorRow(1, ClampMode.NONE);
                 try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
+                try self.shiftCursorRow(1, ClampMode.NONE);
             },
             vaxis.Key.space...0x7E,
             0x80...0xFF,

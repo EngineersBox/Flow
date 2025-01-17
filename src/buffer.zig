@@ -19,6 +19,7 @@ pub const FileBufferIterator = struct {
     piecetable: PieceTable,
     offset: usize,
     end: ?usize,
+    has_returned_empty_on_ending_newline: bool,
 
     pub fn init(allocator: std.mem.Allocator, piecetable: PieceTable, start: usize, end: ?usize) FileBufferIterator {
         return .{
@@ -26,6 +27,7 @@ pub const FileBufferIterator = struct {
             .piecetable = piecetable,
             .offset = start,
             .end = end,
+            .has_returned_empty_on_ending_newline = false,
         };
     }
 
@@ -40,6 +42,7 @@ pub const FileBufferIterator = struct {
     pub fn next(self: *@This()) !?std.ArrayList(u8) {
         var string = std.ArrayList(u8).init(self.allocator);
         errdefer string.deinit();
+        var last_is_newline: bool = false;
         while (self.isFinished()) {
             const char: u8 = self.piecetable.get(self.offset) catch {
                 break;
@@ -50,14 +53,18 @@ pub const FileBufferIterator = struct {
             // of continue or break.
             self.offset += 1;
             if (std.mem.eql(u8, &.{char}, "\n")) {
+                last_is_newline = true;
                 break;
             }
         }
-        if (string.items.len == 0) {
-            string.deinit();
-            return null;
+        if (string.items.len != 0) {
+            return string;
+        } else if (last_is_newline and !self.has_returned_empty_on_ending_newline) {
+            self.has_returned_empty_on_ending_newline = true;
+            return string;
         }
-        return string;
+        string.deinit();
+        return null;
     }
 };
 
@@ -98,13 +105,16 @@ pub const FileBuffer = struct {
         self.allocator.free(self.file_buffer);
     }
 
-    pub fn insert(self: *@This(), index: usize, bytes: []const u8) error{ OutOfBounds, OutOfMemory }!void {
+    pub fn insert(self: *@This(), index: usize, bytes: []const u8, cursor: ?Position) error{ OutOfBounds, OutOfMemory }!void {
         try self.piecetable.insert(index, bytes);
-        self.meta.lines += std.mem.count(u8, bytes, "\n");
+        const lines  = std.mem.count(u8, bytes, "\n");
+        self.meta.lines += lines;
         self.meta.size += bytes.len;
+        const cursor0: Position = cursor orelse return;
+        
     }
 
-    pub fn append(self: *@This(), bytes: []const u8) error{OutOfMemory}!void {
+    pub fn append(self: *@This(), bytes: []const u8, cursor: ?Position) error{OutOfMemory}!void {
         try self.piecetable.append(bytes);
         self.meta.lines += std.mem.count(u8, bytes, "\n");
         self.meta.size += bytes.len;
@@ -122,13 +132,16 @@ pub const FileBuffer = struct {
         return try self.piecetable.get(index);
     }
 
-    pub fn delete(self: *@This(), index: usize, length: usize) error{ OutOfBounds, OutOfMemory }!void {
+    pub fn delete(self: *@This(), index: usize, length: usize, cursor: ?Position) error{ OutOfBounds, OutOfMemory }!void {
         var iterator = FileBufferIterator.init(self.allocator, self.piecetable, index, index + length);
         var lines: usize = 0;
         while (try iterator.next()) |line| : (lines += 1) {
             line.deinit();
         }
         try self.piecetable.delete(index, length);
+        if (cursor) |pos| {
+
+        }
         self.meta.lines -= lines;
         self.meta.size -= length;
     }
@@ -157,7 +170,7 @@ pub const FileBuffer = struct {
         }
         self.buffer_offset_range_indicies = Range{
             .start = start_offset,
-            .end = end_offset,
+            .end = end_offset -| 1,
         };
         self.buffer_line_range_indicies = Range{
             .start = start_lines,
@@ -209,7 +222,7 @@ pub const FileBuffer = struct {
         self.buffer_line_range_indicies.?.start = @intCast(start_line);
         var end_line: isize = @intCast(self.buffer_line_range_indicies.?.end);
         end_line += @as(isize, @intCast(end_offset)) * std.math.sign(move_amount);
-        self.buffer_line_range_indicies.?.end = @intCast(end_line);
+        self.buffer_line_range_indicies.?.end = @as(usize, @intCast(end_line)) -| 1;
         return true;
     }
 

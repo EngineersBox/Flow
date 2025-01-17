@@ -20,6 +20,7 @@
 * [ ] Configurable colour scheme
 * [ ] Configurable key maps
 * [ ] Treesitter parsing for lines in buffer, using output to style line segments
+* [ ] All operations (`insert`, `append`, `set` & `delete`) on `FileBuffer` need to update `buffer_line_range_indices` and `buffer_offset_range_indices`
 
 ## Refactor
 

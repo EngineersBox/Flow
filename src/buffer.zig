@@ -118,6 +118,10 @@ pub const FileBuffer = struct {
         return result;
     }
 
+    pub inline fn get(self: *@This(), index: usize) error{OutOfBounds}!u8 {
+        return try self.piecetable.get(index);
+    }
+
     pub fn delete(self: *@This(), index: usize, length: usize) error{ OutOfBounds, OutOfMemory }!void {
         var iterator = FileBufferIterator.init(self.allocator, self.piecetable, index, index + length);
         var lines: usize = 0;

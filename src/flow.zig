@@ -215,9 +215,8 @@ pub const Flow = struct {
         new_col += offset_col;
         if (new_col >= 0 and new_col <= current_line_end) {
             // Within line
-            const col_diff: isize = new_col - @as(isize, @intCast(self.vx.screen.cursor_col));
             self.vx.screen.cursor_col = @intCast(new_col);
-            self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + col_diff);
+            self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + offset_col);
             if (new_col != current_line_end or last_char != '\n') {
                 return;
             }
@@ -225,7 +224,7 @@ pub const Flow = struct {
         } else if (new_col < 0 and self.vx.screen.cursor_row == 0 and self.buffer.buffer_offset_range_indicies.?.start == 0) {
             // Already at start of buffer, cannot move up
             return;
-        } else if (new_col >= line.*.items.len and self.buffer.buffer_offset_range_indicies.?.end == self.buffer.meta.size - 1) {
+        } else if (new_col >= current_line_end and self.buffer.buffer_offset_range_indicies.?.end == self.buffer.meta.size - 1) {
             // Already at end of buffer, cannot move down
             return;
         }
@@ -332,9 +331,11 @@ pub const Flow = struct {
                 }
                 // Backward delete
                 try self.buffer.delete(self.cursor_offset - 1, 1);
-                const line = self.getCurrentLine();
-                if (self.vx.screen.cursor_col > 0) {
-                    _ = line.orderedRemove(self.vx.screen.cursor_col - 1);
+                const current_cursor_col = self.vx.screen.cursor_col;
+                try self.shiftCursorCol(-1);
+                if (current_cursor_col > 0) {
+                    const line = self.getCurrentLine();
+                    _ = line.orderedRemove(current_cursor_col - 1);
                 } else {
                     // At start of line, which will merge this line with
                     // the previous. Thus it is easier to just regen window
@@ -342,7 +343,6 @@ pub const Flow = struct {
                     self.clearWindowLines();
                     _ = try self.cacheWindowLines();
                 }
-                try self.shiftCursorCol(-1);
             },
             vaxis.Key.left => {
                 try self.shiftCursorCol(-1);

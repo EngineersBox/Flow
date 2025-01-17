@@ -12,13 +12,13 @@
 
 * [X] Mode system with `NORMAL`, `INSERT`, `VISUAL` and `COMMAND`
 * [X] Piece table based buffer and window system
+* [X] Cursor in insert mode should be a line instead of a block
+* [X] Cursor in insert mode should be able to hover over newline (whether it exists or not) to remove last character (before newline if exists)
 * [ ] Range based delete via visual mode
 * [ ] Config loading
 * [ ] Configurable colour scheme
 * [ ] Configurable key maps
 * [ ] Treesitter parsing for lines in buffer, using output to style line segments
-* [X] Cursor in insert mode should be a line instead of a block
-* [X] Cursor in insert mode should be able to hover over newline (whether it exists or not) to remove last character (before newline if exists)
 
 ## Refactor
 

@@ -66,49 +66,61 @@ const file_extension_languages = std.StaticStringMap(zts.LanguageGrammar).initCo
     .{ "zon", zts.LanguageGrammar.zig },
 });
 
+fn loadGrammar(grammar: zts.LanguageGrammar) !*const zts.Language {
+    inline for (@typeInfo(zts.LanguageGrammar).Enum.fields) |field| {
+        // NOTE: With `inline for` the function gets generated as
+        //       a series of `if` statements relying on the optimizer
+        //       to convert it to a switch.
+        if (field.value == @intFromEnum(grammar)) {
+            return try zts.loadLanguage(@as(zts.LanguageGrammar, @enumFromInt(field.value)));
+        }
+    }
+    // NOTE: When using `inline for` the compiler doesn't know that every
+    //       possible case has been handled requiring an explicit `unreachable`.
+    unreachable;
+}
+
 pub const TreeSitter = struct {
     language: *const zts.Language,
     parser: *zts.Parser,
     tree: ?*zts.Tree,
 
     pub fn initFromFileExtension(extension: []const u8) !?TreeSitter {
-        const grammar = file_extension_languages.get(extension) orelse {
+        const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
             return null;
         };
-        // NOTE: This stupidity is needed because zts.loadLanguage requires
-        //       a comptime grammar argument.
-        const language = switch (grammar) {
-            zts.LanguageGrammar.bash => try zts.loadLanguage(zts.LanguageGrammar.bash),
-            zts.LanguageGrammar.c => try zts.loadLanguage(zts.LanguageGrammar.c),
-            zts.LanguageGrammar.css => try zts.loadLanguage(zts.LanguageGrammar.css),
-            zts.LanguageGrammar.cpp => try zts.loadLanguage(zts.LanguageGrammar.cpp),
-            zts.LanguageGrammar.c_sharp => try zts.loadLanguage(zts.LanguageGrammar.c_sharp),
-            zts.LanguageGrammar.elixir => try zts.loadLanguage(zts.LanguageGrammar.elixir),
-            zts.LanguageGrammar.elm => try zts.loadLanguage(zts.LanguageGrammar.elm),
-            zts.LanguageGrammar.erlang => try zts.loadLanguage(zts.LanguageGrammar.erlang),
-            zts.LanguageGrammar.fsharp => try zts.loadLanguage(zts.LanguageGrammar.fsharp),
-            zts.LanguageGrammar.go => try zts.loadLanguage(zts.LanguageGrammar.go),
-            zts.LanguageGrammar.haskell => try zts.loadLanguage(zts.LanguageGrammar.haskell),
-            zts.LanguageGrammar.java => try zts.loadLanguage(zts.LanguageGrammar.java),
-            zts.LanguageGrammar.javascript => try zts.loadLanguage(zts.LanguageGrammar.javascript),
-            zts.LanguageGrammar.json => try zts.loadLanguage(zts.LanguageGrammar.json),
-            zts.LanguageGrammar.julia => try zts.loadLanguage(zts.LanguageGrammar.julia),
-            zts.LanguageGrammar.kotlin => try zts.loadLanguage(zts.LanguageGrammar.kotlin),
-            zts.LanguageGrammar.lua => try zts.loadLanguage(zts.LanguageGrammar.lua),
-            zts.LanguageGrammar.markdown => try zts.loadLanguage(zts.LanguageGrammar.markdown),
-            zts.LanguageGrammar.nim => try zts.loadLanguage(zts.LanguageGrammar.nim),
-            zts.LanguageGrammar.ocaml => try zts.loadLanguage(zts.LanguageGrammar.ocaml),
-            zts.LanguageGrammar.perl => try zts.loadLanguage(zts.LanguageGrammar.perl),
-            zts.LanguageGrammar.php => try zts.loadLanguage(zts.LanguageGrammar.php),
-            zts.LanguageGrammar.python => try zts.loadLanguage(zts.LanguageGrammar.python),
-            zts.LanguageGrammar.ruby => try zts.loadLanguage(zts.LanguageGrammar.ruby),
-            zts.LanguageGrammar.rust => try zts.loadLanguage(zts.LanguageGrammar.rust),
-            zts.LanguageGrammar.scala => try zts.loadLanguage(zts.LanguageGrammar.scala),
-            zts.LanguageGrammar.toml => try zts.loadLanguage(zts.LanguageGrammar.toml),
-            zts.LanguageGrammar.typescript => try zts.loadLanguage(zts.LanguageGrammar.typescript),
-            zts.LanguageGrammar.zig => try zts.loadLanguage(zts.LanguageGrammar.zig),
-        };
-        return try TreeSitter.init(language);
+        // const language = switch (grammar) {
+        // zts.LanguageGrammar.bash => try zts.loadLanguage(zts.LanguageGrammar.bash),
+        // zts.LanguageGrammar.c => try zts.loadLanguage(zts.LanguageGrammar.c),
+        // zts.LanguageGrammar.css => try zts.loadLanguage(zts.LanguageGrammar.css),
+        // zts.LanguageGrammar.cpp => try zts.loadLanguage(zts.LanguageGrammar.cpp),
+        // zts.LanguageGrammar.c_sharp => try zts.loadLanguage(zts.LanguageGrammar.c_sharp),
+        // zts.LanguageGrammar.elixir => try zts.loadLanguage(zts.LanguageGrammar.elixir),
+        // zts.LanguageGrammar.elm => try zts.loadLanguage(zts.LanguageGrammar.elm),
+        // zts.LanguageGrammar.erlang => try zts.loadLanguage(zts.LanguageGrammar.erlang),
+        // zts.LanguageGrammar.fsharp => try zts.loadLanguage(zts.LanguageGrammar.fsharp),
+        // zts.LanguageGrammar.go => try zts.loadLanguage(zts.LanguageGrammar.go),
+        // zts.LanguageGrammar.haskell => try zts.loadLanguage(zts.LanguageGrammar.haskell),
+        // zts.LanguageGrammar.java => try zts.loadLanguage(zts.LanguageGrammar.java),
+        // zts.LanguageGrammar.javascript => try zts.loadLanguage(zts.LanguageGrammar.javascript),
+        // zts.LanguageGrammar.json => try zts.loadLanguage(zts.LanguageGrammar.json),
+        // zts.LanguageGrammar.julia => try zts.loadLanguage(zts.LanguageGrammar.julia),
+        // zts.LanguageGrammar.kotlin => try zts.loadLanguage(zts.LanguageGrammar.kotlin),
+        // zts.LanguageGrammar.lua => try zts.loadLanguage(zts.LanguageGrammar.lua),
+        // zts.LanguageGrammar.markdown => try zts.loadLanguage(zts.LanguageGrammar.markdown),
+        // zts.LanguageGrammar.nim => try zts.loadLanguage(zts.LanguageGrammar.nim),
+        // zts.LanguageGrammar.ocaml => try zts.loadLanguage(zts.LanguageGrammar.ocaml),
+        // zts.LanguageGrammar.perl => try zts.loadLanguage(zts.LanguageGrammar.perl),
+        // zts.LanguageGrammar.php => try zts.loadLanguage(zts.LanguageGrammar.php),
+        // zts.LanguageGrammar.python => try zts.loadLanguage(zts.LanguageGrammar.python),
+        // zts.LanguageGrammar.ruby => try zts.loadLanguage(zts.LanguageGrammar.ruby),
+        // zts.LanguageGrammar.rust => try zts.loadLanguage(zts.LanguageGrammar.rust),
+        // zts.LanguageGrammar.scala => try zts.loadLanguage(zts.LanguageGrammar.scala),
+        // zts.LanguageGrammar.toml => try zts.loadLanguage(zts.LanguageGrammar.toml),
+        // zts.LanguageGrammar.typescript => try zts.loadLanguage(zts.LanguageGrammar.typescript),
+        // zts.LanguageGrammar.zig => try zts.loadLanguage(zts.LanguageGrammar.zig),
+        // };
+        return try TreeSitter.init(try loadGrammar(grammar));
     }
 
     pub fn init(language: *const zts.Language) !TreeSitter {

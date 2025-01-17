@@ -207,8 +207,13 @@ pub const Flow = struct {
     fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
         const line: *const std.ArrayList(u8) = self.getCurrentLine();
         const current_line_end = switch (self.mode) {
-            TextMode.INSERT => line.*.items.len,
-            else => line.*.items.len -| 1,
+            TextMode.INSERT => blk: {
+                if (line.items.len <= 1) {
+                    break :blk line.items.len -| 1;
+                }
+                break :blk line.items.len;
+            },
+            else => line.items.len -| 1,
         };
         const last_char: u8 = line.getLast();
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
@@ -253,8 +258,12 @@ pub const Flow = struct {
         if (new_row > prev_row) {
             self.cursor_offset += (prev_row_len - prev_col) + new_col;
             return;
+        } else if (new_row < prev_row) {
+            self.cursor_offset -= prev_col + (new_row_len - new_col);
+            return;
         }
-        self.cursor_offset -= prev_col + (new_row_len - new_col);
+        self.cursor_offset -|= prev_col;
+        self.cursor_offset += new_col;
     }
 
     fn shiftCursorRow(self: *Flow, offset_row: isize, clamp: ClampMode) !void {
@@ -337,6 +346,11 @@ pub const Flow = struct {
                     const line = self.getCurrentLine();
                     _ = line.orderedRemove(current_cursor_col - 1);
                 } else {
+                    // TODO: Make this merge the current and previous lines in
+                    //       the window lines cache instead of refreshing the
+                    //       cache. We should only need to refresh during a visual
+                    //       selection delete
+
                     // At start of line, which will merge this line with
                     // the previous. Thus it is easier to just regen window
                     // lines cache
@@ -359,6 +373,7 @@ pub const Flow = struct {
             vaxis.Key.escape => {
                 self.mode = TextMode.NORMAL;
                 self.confineCursorToCurrentLine(ClampMode.NONE);
+                self.adjustCursorOffset(self.vx.screen.cursor_row, self.vx.screen.cursor_col);
             },
             else => {
                 return;
@@ -453,7 +468,7 @@ pub const Flow = struct {
         for (self.window_lines.items, 0..) |line, y_offset| {
             try self.drawLine(line.items, y_offset, window);
         }
-        const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d}:{d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
+        const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d} | {d}:{d}", .{ self.cursor_offset, self.vx.screen.cursor_row, self.vx.screen.cursor_col });
         defer self.allocator.free(cursor_pos_buffer);
         const status_bar = window.child(.{
             .x_off = window.width - cursor_pos_buffer.len - 1,

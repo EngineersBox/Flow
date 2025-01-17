@@ -22,5 +22,5 @@
 
 ## Refactor
 
-* [ ] Improve `draw()` call structuring
 * [X] Optimise language loading to generate switch at compile time
+* [ ] Improve `draw()` call structuring

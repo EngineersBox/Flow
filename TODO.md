@@ -6,7 +6,8 @@
 * [X] Inserting a newline doesn't cause line to split
 * [X] Newlines not being written to file when saving
 * [X] Cursor offset is not correctly calculated after altering buffer contents. I.e inserting a newline into the middle of a line
-* [ ] Backspace at start of line seems to fail sometimes and join only part of the line
+* [X] Backspace at start of line seems to fail sometimes and join only part of the line
+* [ ] Cursor at end of document moving to the right causes a crash when there is no newline at the end
 
 ## Implement
 

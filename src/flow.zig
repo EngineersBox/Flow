@@ -199,7 +199,6 @@ pub const Flow = struct {
             },
             ClampMode.END => {
                 self.vx.screen.cursor_col = current_line_editable_end;
-                std.log.err("Confined col: {d} row: {d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
             },
         }
     }
@@ -208,8 +207,13 @@ pub const Flow = struct {
         const line: *const std.ArrayList(u8) = self.getCurrentLine();
         const current_line_end = switch (self.mode) {
             TextMode.INSERT => blk: {
-                if (line.items.len <= 1) {
-                    break :blk line.items.len -| 1;
+                if (line.items.len == 0) {
+                    break :blk 0;
+                } else if (line.items.len == 1) {
+                    if (line.items[0] == '\n') {
+                        break :blk line.items.len -| 1;
+                    }
+                    break :blk line.items.len;
                 }
                 break :blk line.items.len;
             },
@@ -218,11 +222,12 @@ pub const Flow = struct {
         const last_char: u8 = line.getLast();
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
         new_col += offset_col;
+        std.log.err("New col: {d} Line end: {d}", .{ new_col, current_line_end });
         if (new_col >= 0 and new_col <= current_line_end) {
             // Within line
             self.vx.screen.cursor_col = @intCast(new_col);
             self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + offset_col);
-            if (new_col != current_line_end or last_char != '\n') {
+            if (new_col != current_line_end or last_char != '\n' or self.cursor_offset == self.buffer.meta.size) {
                 return;
             }
             // Column is a newline, skip over it to next row
@@ -243,7 +248,6 @@ pub const Flow = struct {
         } else if (new_col == 0) {
             clamp = ClampMode.NONE;
         }
-        std.log.err("Current col: {d} row: {d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
         try self.shiftCursorRow(
             shift_factor,
             clamp,

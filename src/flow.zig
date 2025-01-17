@@ -37,6 +37,15 @@ pub const TextMode = enum(u2) {
             TextMode.COMMAND => colours.CYAN,
         };
     }
+
+    pub fn cursorShape(self: TextMode) vaxis.Cell.CursorShape {
+        return switch (self) {
+            TextMode.NORMAL => vaxis.Cell.CursorShape.block,
+            TextMode.INSERT => vaxis.Cell.CursorShape.beam,
+            TextMode.VISUAL => vaxis.Cell.CursorShape.block,
+            TextMode.COMMAND => vaxis.Cell.CursorShape.block,
+        };
+    }
 };
 
 const ClampMode = enum(u2) { NONE = 0, START = 1, END = 2 };
@@ -177,18 +186,19 @@ pub const Flow = struct {
     }
 
     inline fn confineCursorToCurrentLine(self: *Flow, clamp: ClampMode) void {
+        const current_line_editable_end = switch (self.mode) {
+            TextMode.INSERT => self.getCurrentLine().items.len -| 1,
+            else => self.getCurrentLine().items.len -| 2,
+        };
         switch (clamp) {
-            .NONE => {
-                self.vx.screen.cursor_col = @min(
-                    self.vx.screen.cursor_col,
-                    self.window_lines.items[self.vx.screen.cursor_row].items.len -| 2,
-                );
+            ClampMode.NONE => {
+                self.vx.screen.cursor_col = @min(self.vx.screen.cursor_col, current_line_editable_end);
             },
-            .START => {
+            ClampMode.START => {
                 self.vx.screen.cursor_col = 0;
             },
-            .END => {
-                self.vx.screen.cursor_col = self.window_lines.items[self.vx.screen.cursor_row].items.len -| 2;
+            ClampMode.END => {
+                self.vx.screen.cursor_col = current_line_editable_end;
                 std.log.err("Confined col: {d} row: {d}", .{ self.vx.screen.cursor_col, self.vx.screen.cursor_row });
             },
         }
@@ -196,15 +206,19 @@ pub const Flow = struct {
 
     fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
         const line: *const std.ArrayList(u8) = self.getCurrentLine();
+        const current_line_end = switch (self.mode) {
+            TextMode.INSERT => line.*.items.len,
+            else => line.*.items.len -| 1,
+        };
         const last_char: u8 = line.getLast();
         var new_col: isize = @intCast(self.vx.screen.cursor_col);
         new_col += offset_col;
-        if (new_col >= 0 and new_col < line.*.items.len) {
+        if (new_col >= 0 and new_col <= current_line_end) {
             // Within line
             const col_diff: isize = new_col - @as(isize, @intCast(self.vx.screen.cursor_col));
             self.vx.screen.cursor_col = @intCast(new_col);
             self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + col_diff);
-            if (new_col != line.*.items.len - 1 or last_char != '\n') {
+            if (new_col != current_line_end or last_char != '\n') {
                 return;
             }
             // Column is a newline, skip over it to next row
@@ -294,36 +308,41 @@ pub const Flow = struct {
                 try line.insertSlice(self.vx.screen.cursor_col, self.tab_spaces_buffer);
                 try self.shiftCursorCol(@intCast(self.config.spaces_per_tab));
             },
-            vaxis.Key.delete, vaxis.Key.backspace => {
-                if (key.codepoint == vaxis.Key.delete and self.cursor_offset < self.buffer.meta.size - 1) {
-                    // Forward delete
-                    try self.buffer.delete(self.cursor_offset, 1);
-                    const line = self.getCurrentLine();
-                    if (self.vx.screen.cursor_col < line.items.len - 1) {
-                        _ = line.orderedRemove(self.vx.screen.cursor_col);
-                    } else {
-                        // At end of line, which will merge this line with
-                        // then ext. Thus it is easier to just regen window
-                        // lines cache
-                        self.clearWindowLines();
-                        _ = try self.cacheWindowLines();
-                    }
-                    try self.shiftCursorCol(0);
-                } else if (key.codepoint == vaxis.Key.backspace and self.cursor_offset > 0) {
-                    // Backward delete
-                    try self.buffer.delete(self.cursor_offset - 1, 1);
-                    const line = self.getCurrentLine();
-                    if (self.vx.screen.cursor_col > 0) {
-                        _ = line.orderedRemove(self.vx.screen.cursor_col - 1);
-                    } else {
-                        // At start of line, which will merge this line with
-                        // the previous. Thus it is easier to just regen window
-                        // lines cache
-                        self.clearWindowLines();
-                        _ = try self.cacheWindowLines();
-                    }
-                    try self.shiftCursorCol(-1);
+            vaxis.Key.delete => {
+                if (self.cursor_offset == self.buffer.meta.size - 1) {
+                    return;
                 }
+                // Forward delete
+                try self.buffer.delete(self.cursor_offset, 1);
+                const line = self.getCurrentLine();
+                if (self.vx.screen.cursor_col < line.items.len - 1) {
+                    _ = line.orderedRemove(self.vx.screen.cursor_col);
+                } else {
+                    // At end of line, which will merge this line with
+                    // then ext. Thus it is easier to just regen window
+                    // lines cache
+                    self.clearWindowLines();
+                    _ = try self.cacheWindowLines();
+                }
+                try self.shiftCursorCol(0);
+            },
+            vaxis.Key.backspace => {
+                if (self.cursor_offset == 0) {
+                    return;
+                }
+                // Backward delete
+                try self.buffer.delete(self.cursor_offset - 1, 1);
+                const line = self.getCurrentLine();
+                if (self.vx.screen.cursor_col > 0) {
+                    _ = line.orderedRemove(self.vx.screen.cursor_col - 1);
+                } else {
+                    // At start of line, which will merge this line with
+                    // the previous. Thus it is easier to just regen window
+                    // lines cache
+                    self.clearWindowLines();
+                    _ = try self.cacheWindowLines();
+                }
+                try self.shiftCursorCol(-1);
             },
             vaxis.Key.left => {
                 try self.shiftCursorCol(-1);
@@ -337,7 +356,10 @@ pub const Flow = struct {
             vaxis.Key.down => {
                 try self.shiftCursorRow(1, ClampMode.NONE);
             },
-            vaxis.Key.escape => self.mode = TextMode.NORMAL,
+            vaxis.Key.escape => {
+                self.mode = TextMode.NORMAL;
+                self.confineCursorToCurrentLine(ClampMode.NONE);
+            },
             else => {
                 return;
             },
@@ -374,10 +396,10 @@ pub const Flow = struct {
     pub fn update(self: *Flow, event: Event) !void {
         switch (event) {
             .key_press => |key| try switch (self.mode) {
-                .NORMAL => self.handleModeNormal(key),
-                .INSERT => self.handleModeInsert(key),
-                .VISUAL => self.handleModeVisual(key),
-                .COMMAND => self.handleModeCommand(key),
+                TextMode.NORMAL => self.handleModeNormal(key),
+                TextMode.INSERT => self.handleModeInsert(key),
+                TextMode.VISUAL => self.handleModeVisual(key),
+                TextMode.COMMAND => self.handleModeCommand(key),
             },
             .mouse => |mouse| self.mouse = mouse,
             .winsize => |ws| {
@@ -440,18 +462,8 @@ pub const Flow = struct {
             .height = .{ .limit = 1 },
         });
         _ = try status_bar.printSegment(.{ .text = cursor_pos_buffer, .style = .{} }, .{});
-        const cursor: vaxis.Window = window.child(.{
-            .x_off = self.vx.screen.cursor_col,
-            .y_off = self.vx.screen.cursor_row,
-            .width = .{
-                .limit = 1,
-            },
-            .height = .{
-                .limit = 1,
-            },
-        });
-        const cursor_value: u8 = self.buffer.piecetable.get(self.cursor_offset) catch ' ';
-        _ = try cursor.printSegment(.{ .text = &.{cursor_value}, .style = .{ .reverse = true } }, .{});
+        window.showCursor(self.vx.screen.cursor_col, self.vx.screen.cursor_row);
+        window.setCursorShape(self.mode.cursorShape());
         const mode_string = switch (self.mode) {
             TextMode.NORMAL => " NORMAL ",
             TextMode.INSERT => " INSERT ",

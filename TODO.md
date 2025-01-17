@@ -17,8 +17,8 @@
 * [ ] Configurable colour scheme
 * [ ] Configurable key maps
 * [ ] Treesitter parsing for lines in buffer, using output to style line segments
-* [ ] Cursor in insert mode should be a line instead of a block
-* [ ] Cursor in insert mode should be able to hover over newline (whether it exists or not) to remove last character (before newline if exists)
+* [X] Cursor in insert mode should be a line instead of a block
+* [X] Cursor in insert mode should be able to hover over newline (whether it exists or not) to remove last character (before newline if exists)
 
 ## Refactor
 

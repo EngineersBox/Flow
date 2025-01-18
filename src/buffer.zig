@@ -336,7 +336,6 @@ pub const FileBuffer = struct {
     }
 
     pub fn delete(self: *@This(), index: usize, length: usize) error{ StartExceedsSize, OutOfBounds, OutOfMemory }!void {
-        // TODO: Walk forward number of newlines or end of buffer
         if (index > self.buffer_offset_range_indicies.?.end) {
             try self.deleteAfterWindow(index, length);
             return;

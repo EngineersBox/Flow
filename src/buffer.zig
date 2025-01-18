@@ -12,6 +12,25 @@ pub const Position = struct {
 pub const Range = struct {
     start: usize,
     end: usize,
+    max_diff: ?usize,
+
+    pub inline fn hasGrowSpace(self: *@This()) bool {
+        return self.max_diff != null and self.end - self.start < self.max_diff.?;
+    }
+
+    pub inline fn rangeLeft(self: *@This()) usize {
+        if (self.max_diff) {
+            return self.max_diff.? -| (self.end - self.start);
+        }
+        return 0;
+    }
+
+    pub inline fn maxEnd(self: *@This()) usize {
+        if (self.max_diff) |diff| {
+            return self.start + diff;
+        }
+        return self.end;
+    }
 };
 
 pub const FileBufferIterator = struct {
@@ -105,25 +124,126 @@ pub const FileBuffer = struct {
         self.allocator.free(self.file_buffer);
     }
 
-    pub fn insert(self: *@This(), index: usize, bytes: []const u8, cursor: ?Position) error{ OutOfBounds, OutOfMemory }!void {
+    pub fn insert(self: *@This(), index: usize, bytes: []const u8) error{ OutOfBounds, OutOfMemory }!void {
+        if (bytes.len == 0) {
+            return;
+        }
         try self.piecetable.insert(index, bytes);
-        const lines  = std.mem.count(u8, bytes, "\n");
+        const lines: usize = std.mem.count(u8, bytes, "\n");
         self.meta.lines += lines;
         self.meta.size += bytes.len;
-        const cursor0: Position = cursor orelse return;
-        
+        if (self.meta.lines < self.buffer_line_range_indicies.?.maxEnd()) {
+            self.buffer_line_range_indicies.?.end += lines;
+            self.buffer_offset_range_indicies.?.end += bytes.len;
+            return;
+        } else if (index > self.buffer_offset_range_indicies.?.end) {
+            // Past the window, nothing to update
+            return;
+        } else if (lines == 0) {
+            // No newlines, just update offsets
+            if (index <= self.buffer_offset_range_indicies.?.start) {
+                self.buffer_offset_range_indicies.?.start += bytes.len;
+            }
+            self.buffer_offset_range_indicies.?.end += bytes.len;
+            return;
+        }
+        // At least one line added
+        self.buffer_offset_range_indicies.?.end += bytes.len;
+        var newlines_to_go_back = lines;
+        while (newlines_to_go_back > 0) {
+            self.buffer_offset_range_indicies.?.end -= 1;
+            if (try self.get(self.buffer_offset_range_indicies.?.end) == '\n') {
+                newlines_to_go_back -= 1;
+            }
+        }
+        if (index >= self.buffer_offset_range_indicies.?.start) {
+            return;
+        }
+        self.buffer_offset_range_indicies.?.start += bytes.len;
+        newlines_to_go_back = lines + 1;
+        while (newlines_to_go_back > 0 and self.buffer_offset_range_indicies.?.start >= 0) {
+            if (try self.get(self.buffer_offset_range_indicies.?.start - 1) == '\n') {
+                newlines_to_go_back -= 1;
+            }
+            self.buffer_offset_range_indicies.?.start -|= 1;
+        }
+        if (self.buffer_offset_range_indicies.?.start > 0) {
+            // We will land on the newline behind the desired line
+            // conditional on not being at the start of the buffer.
+            // In this case we jump to next offset which is the start
+            // of the desired line.
+            self.buffer_offset_range_indicies.?.start += 1;
+        }
     }
 
-    pub fn append(self: *@This(), bytes: []const u8, cursor: ?Position) error{OutOfMemory}!void {
+    pub fn append(self: *@This(), bytes: []const u8) error{OutOfMemory}!void {
         try self.piecetable.append(bytes);
-        self.meta.lines += std.mem.count(u8, bytes, "\n");
+        const lines = std.mem.count(u8, bytes, "\n");
+        self.meta.lines += lines;
+        const prev_size = self.meta.size;
         self.meta.size += bytes.len;
+        if (self.meta.lines < self.buffer_line_range_indicies.?.maxEnd()) {
+            self.buffer_line_range_indicies.?.end += lines;
+            self.buffer_offset_range_indicies.?.end += bytes.len;
+            return;
+        } else if (prev_size -| 1 > self.buffer_offset_range_indicies.?.end) {
+            // Past the window, nothing to update
+            return;
+        } else if (lines == 0) {
+            // No newlines, just update offsets
+            if (prev_size -| 1 <= self.buffer_offset_range_indicies.?.start) {
+                self.buffer_offset_range_indicies.?.start += bytes.len;
+            }
+            self.buffer_offset_range_indicies.?.end += bytes.len;
+            return;
+        }
+        // At least one line added
+        self.buffer_offset_range_indicies.?.end += bytes.len;
+        var newlines_to_go_back = lines;
+        while (newlines_to_go_back > 0) {
+            self.buffer_offset_range_indicies.?.end -= 1;
+            if (try self.get(self.buffer_offset_range_indicies.?.end) == '\n') {
+                newlines_to_go_back -= 1;
+            }
+        }
     }
 
     pub fn set(self: *@This(), index: usize, value: u8) error{ OutOfBounds, OutOfMemory }!u8 {
         const result: u8 = try self.piecetable.set(index, value);
-        if (value == '\n') {
-            self.meta.lines += 1;
+        if (value != '\n') {
+            return result;
+        }
+        if (self.meta.lines < self.buffer_line_range_indicies.?.maxEnd()) {
+            self.buffer_line_range_indicies.?.end += 1;
+            return;
+        } else if (index > self.buffer_offset_range_indicies.?.end) {
+            // Past the window, nothing to update
+            return;
+        }
+        // At least one line added
+        var newlines_to_go_back = 1;
+        while (newlines_to_go_back > 0) {
+            self.buffer_offset_range_indicies.?.end -= 1;
+            if (try self.get(self.buffer_offset_range_indicies.?.end) == '\n') {
+                newlines_to_go_back -= 1;
+            }
+        }
+        if (index >= self.buffer_offset_range_indicies.?.start) {
+            return;
+        }
+        newlines_to_go_back = 2;
+        while (newlines_to_go_back > 0 and self.buffer_offset_range_indicies.?.start >= 0) {
+            if (try self.get(self.buffer_offset_range_indicies.?.start - 1) == '\n') {
+                newlines_to_go_back -= 1;
+            }
+            self.buffer_offset_range_indicies.?.start -|= 1;
+        }
+        if (self.buffer_offset_range_indicies.?.start > 0) {
+            // We will land on the newline behind the desired line
+            // conditional on not being at the start of the buffer.
+            // In this case we jump to next offset which is the start
+            // of the desired line.
+            self.buffer_offset_range_indicies.?.start += 1;
         }
         return result;
     }
@@ -132,18 +252,99 @@ pub const FileBuffer = struct {
         return try self.piecetable.get(index);
     }
 
-    pub fn delete(self: *@This(), index: usize, length: usize, cursor: ?Position) error{ OutOfBounds, OutOfMemory }!void {
+    fn deleteAfterWindow(self: *@This(), index: usize, length: usize) error{ OutOfBounds, OutOfMemory }!void {
+        if (index + length > self.meta.size) {
+            return error.OutOfBounds;
+        }
         var iterator = FileBufferIterator.init(self.allocator, self.piecetable, index, index + length);
         var lines: usize = 0;
+        var current_offset = index;
         while (try iterator.next()) |line| : (lines += 1) {
+            current_offset += line.items.len - 1;
             line.deinit();
         }
         try self.piecetable.delete(index, length);
-        if (cursor) |pos| {
-
-        }
         self.meta.lines -= lines;
         self.meta.size -= length;
+    }
+
+    fn deleteAfterWindowStart(self: *@This(), index: usize, length: usize) error{ OutOfBounds, OutOfMemory }!void {
+        if (index + length > self.meta.size) {
+            return error.OutOfBounds;
+        }
+        var offset = self.buffer_offset_range_indicies.?.start;
+        var lines_from_start_to_index: usize = 0;
+        while (offset <= index) : (offset += 1) {
+            if (try self.get(offset) == '\n') {
+                lines_from_start_to_index += 1;
+            }
+        }
+        var lines: usize = 0;
+        while (offset < index + length) : (offset += 1) {
+            if (try self.get(offset) == '\n') {
+                lines += 1;
+            }
+        }
+        try self.piecetable.delete(index, length);
+        self.meta.lines -= lines;
+        self.meta.size -= length;
+        self.buffer_offset_range_indicies.?.end = index;
+        var lines_to_add_to_end = (self.buffer_line_range_indicies.?.end - self.buffer_line_range_indicies.?.start) - lines_from_start_to_index;
+        self.buffer_line_range_indicies.?.end = self.buffer_line_range_indicies.?.end - lines_from_start_to_index;
+        offset = index;
+        var lines_added: usize = 0;
+        while (lines_to_add_to_end > 0 and offset < self.meta.size - 1) : (offset += 1) {
+            const char = self.get(offset) catch break;
+            if (char == '\n') {
+                lines_to_add_to_end -= 1;
+                lines_added += 1;
+            }
+        }
+        self.buffer_offset_range_indicies.?.end = offset;
+        self.buffer_line_range_indicies.?.end += lines_added;
+    }
+
+    fn deleteBeforeWindowStart(self: *@This(), index: usize, length: usize) error{ StartExceedsSize, OutOfBounds, OutOfMemory }!void {
+        if (index + length > self.meta.size) {
+            return error.OutOfBounds;
+        }
+        var offset = index;
+        var start_adjument_lines: usize = 0;
+        var lines: usize = 0;
+        while (offset <= index + length) : (offset += 1) {
+            if (try self.get(offset) != '\n') {
+                continue;
+            }
+            lines += 1;
+            if (offset < self.buffer_offset_range_indicies.?.start) {
+                start_adjument_lines += 1;
+            }
+        }
+        var line_start_before_index: usize = index;
+        while (line_start_before_index >= 0 and try self.get(line_start_before_index) != '\n') : (line_start_before_index -= 1) {}
+        try self.piecetable.delete(index, length);
+        self.meta.lines -= lines;
+        self.meta.size -= length;
+        offset = line_start_before_index;
+        while (start_adjument_lines > 0 and offset < self.meta.size -| 1) : (offset += 1) {
+            const char = self.get(offset) catch break;
+            if (char == '\n') {
+                start_adjument_lines -= 1;
+            }
+        }
+        try self.setBufferWindow(offset, self.buffer_offset_range_indicies.?.max_diff.?);
+    }
+
+    pub fn delete(self: *@This(), index: usize, length: usize) error{ StartExceedsSize, OutOfBounds, OutOfMemory }!void {
+        // TODO: Walk forward number of newlines or end of buffer
+        if (index > self.buffer_offset_range_indicies.?.end) {
+            try self.deleteAfterWindow(index, length);
+            return;
+        } else if (index > self.buffer_offset_range_indicies.?.start) {
+            try self.deleteAfterWindowStart(index, length);
+            return;
+        }
+        try self.deleteBeforeWindowStart(index, length);
     }
 
     /// Discard existing window and create a new one
@@ -171,10 +372,12 @@ pub const FileBuffer = struct {
         self.buffer_offset_range_indicies = Range{
             .start = start_offset,
             .end = end_offset -| 1,
+            .max_diff = null,
         };
         self.buffer_line_range_indicies = Range{
             .start = start_lines,
             .end = end_lines,
+            .max_diff = height,
         };
     }
 

@@ -134,15 +134,19 @@ pub const Flow = struct {
         switch (key.codepoint) {
             'i' => self.mode = TextMode.INSERT,
             'h', vaxis.Key.left => {
+                std.log.err("KEY: left", .{});
                 try self.shiftCursorCol(-1);
             },
             'j', vaxis.Key.down => {
+                std.log.err("KEY: down", .{});
                 try self.shiftCursorRow(1, ClampMode.NONE);
             },
             'k', vaxis.Key.up => {
+                std.log.err("KEY: up", .{});
                 try self.shiftCursorRow(-1, ClampMode.NONE);
             },
             'l', vaxis.Key.right => {
+                std.log.err("KEY: right", .{});
                 try self.shiftCursorCol(1);
             },
             else => return,
@@ -156,6 +160,11 @@ pub const Flow = struct {
     }
 
     fn updateBufferWindow(self: *Flow, offset_row: isize) !bool {
+        if (offset_row < 0 and self.buffer.buffer_offset_range_indicies.?.start < @abs(offset_row)) {
+            return false;
+        } else if (offset_row > 0 and self.buffer.meta.size - 1 - self.buffer.buffer_offset_range_indicies.?.end < @abs(offset_row)) {
+            return false;
+        }
         self.clearWindowLines();
         const new_window_valid: bool = try self.buffer.updateBufferWindow(offset_row);
         _ = try self.cacheWindowLines();
@@ -220,13 +229,30 @@ pub const Flow = struct {
         std.log.err("New col: {d} Line end: {d}", .{ new_col, current_line_end });
         std.log.err("Cursor offset: {d}", .{self.cursor_offset});
         std.log.err("Range end: {d} Meta size: {d}", .{ self.buffer.buffer_offset_range_indicies.?.end, self.buffer.meta.size });
+        std.log.err("Last char: {s}", .{[1]u8{last_char}});
         if (new_col >= 0 and new_col <= current_line_end) {
             // Within line
-            self.vx.screen.cursor_col = @intCast(new_col);
-            self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + offset_col);
-            if (new_col != current_line_end or last_char != '\n' or self.cursor_offset == self.buffer.meta.size - 1) {
+            // self.vx.screen.cursor_col = @intCast(new_col);
+            // self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + offset_col);
+            // if (new_col != current_line_end or last_char != '\n' or self.cursor_offset == self.buffer.meta.size - 1) {
+            //     return;
+            // }
+            if (new_col < current_line_end) {
+                self.vx.screen.cursor_col = @intCast(new_col);
+                self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + offset_col);
+                std.log.err("New cursor offset: {d}", .{self.cursor_offset});
+                return;
+            } else if (last_char != '\n' or self.cursor_offset >= self.buffer.meta.size - 1) {
                 return;
             }
+            // if (new_col == current_line_end and last_char == '\n') {
+            //     if (self.cursor_offset == self.buffer.meta.size - 1) {
+            //         return;
+            //     }
+            // }
+            self.vx.screen.cursor_col = @intCast(new_col);
+            self.cursor_offset = @intCast(@as(isize, @intCast(self.cursor_offset)) + offset_col);
+            std.log.err("New cursor offset: {d}", .{self.cursor_offset});
             // Column is a newline, skip over it to next row
         } else if (new_col < 0 and self.vx.screen.cursor_row == 0 and self.buffer.buffer_offset_range_indicies.?.start == 0) {
             // Already at start of buffer, cannot move up
@@ -265,6 +291,7 @@ pub const Flow = struct {
         }
         self.cursor_offset -|= prev_col;
         self.cursor_offset += new_col;
+        std.log.err("New cursor offset: {d}", .{self.cursor_offset});
     }
 
     fn shiftCursorRow(self: *Flow, offset_row: isize, clamp: ClampMode) !void {
@@ -275,6 +302,7 @@ pub const Flow = struct {
             const prev_row = self.vx.screen.cursor_row;
             const prev_col = self.vx.screen.cursor_col;
             self.vx.screen.cursor_row = @intCast(new_row);
+            std.log.err("New cursor row: {d}", .{self.vx.screen.cursor_row});
             self.confineCursorToCurrentLine(clamp);
             self.adjustCursorOffset(prev_row, prev_col);
             return;
@@ -294,6 +322,7 @@ pub const Flow = struct {
     fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.enter => {
+                std.log.err("KEY: '\\n'", .{});
                 std.log.err("Line count before: {d}", .{self.window_lines.items.len});
                 try self.buffer.insert(self.cursor_offset, &.{'\n'});
                 self.clearWindowLines();
@@ -306,6 +335,7 @@ pub const Flow = struct {
             vaxis.Key.space...0x7E,
             0x80...0xFF,
             => {
+                std.log.err("KEY: '{s}'", .{[1]u8{@intCast(key.codepoint)}});
                 try self.buffer.insert(self.cursor_offset, &.{@intCast(key.codepoint)});
                 const line = self.getCurrentLine();
                 try line.insert(self.vx.screen.cursor_col, @intCast(key.codepoint));
@@ -320,6 +350,7 @@ pub const Flow = struct {
                 try self.shiftCursorCol(@intCast(self.config.spaces_per_tab));
             },
             vaxis.Key.delete => {
+                std.log.err("KEY: delete", .{});
                 if (self.cursor_offset == self.buffer.meta.size - 1) {
                     return;
                 }
@@ -338,6 +369,7 @@ pub const Flow = struct {
                 try self.shiftCursorCol(0);
             },
             vaxis.Key.backspace => {
+                std.log.err("KEY: backspace", .{});
                 if (self.cursor_offset == 0) {
                     return;
                 }
@@ -362,15 +394,19 @@ pub const Flow = struct {
                 }
             },
             vaxis.Key.left => {
+                std.log.err("KEY: left", .{});
                 try self.shiftCursorCol(-1);
             },
             vaxis.Key.right => {
+                std.log.err("KEY: right", .{});
                 try self.shiftCursorCol(1);
             },
             vaxis.Key.up => {
+                std.log.err("KEY: up", .{});
                 try self.shiftCursorRow(-1, ClampMode.NONE);
             },
             vaxis.Key.down => {
+                std.log.err("KEY: down", .{});
                 try self.shiftCursorRow(1, ClampMode.NONE);
             },
             vaxis.Key.escape => {

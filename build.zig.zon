@@ -11,8 +11,8 @@
             .hash = "12205e50a5dcc02940500ed84fa03752a5e0e7859fbd16c17db015d8adec1f174b08",
         },
         .piecetable = .{
-            .url = "https://github.com/engineersbox/zig-piecetable/archive/42018c96a455d1c6b7223fc4c4f0896154915cf3.tar.gz",
-            .hash = "1220e8ba05943be040c73e4df2f703488404c014fb28bdfbd1f278897a5a2bd5c38c",
+            .url = "https://github.com/engineersbox/zig-piecetable/archive/201fe116147e21c077ad450629e25630e8cb9423.tar.gz",
+            .hash = "12200e8274f56a2e3e46586ff3b07975f06f2f972922a692fce2c95d06cd95d0ec3e",
         },
     },
     .paths = .{

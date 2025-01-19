@@ -8,6 +8,7 @@
 * [X] Cursor offset is not correctly calculated after altering buffer contents. I.e inserting a newline into the middle of a line
 * [X] Backspace at start of line seems to fail sometimes and join only part of the line
 * [X] Cursor at end of document moving to the right causes a crash when there is no newline at the end
+* [ ] Hard to replicate issue where `shiftCursorRow` indexes window lines out of bounds. Implies `self.vx.screen.cursor_row` is not updated correctly in some operation beforehand, likely to with insert/delete at the end of the buffer
 
 ## Implement
 
@@ -20,7 +21,7 @@
 * [ ] Configurable colour scheme
 * [ ] Configurable key maps
 * [ ] Treesitter parsing for lines in buffer, using output to style line segments
-* [ ] All operations (`insert`, `append`, `set` & `delete`) on `FileBuffer` need to update `buffer_line_range_indices` and `buffer_offset_range_indices`
+* [X] All operations (`insert`, `append`, `set` & `delete`) on `FileBuffer` need to update `buffer_line_range_indices` and `buffer_offset_range_indices`
 
 ## Refactor
 

@@ -1,9 +1,8 @@
 const std = @import("std");
 
-pub fn logToFile(allocator: std.mem.Allocator, comptime fmt: []const u8, args: anytype) !void {
-    const file = try std.fs.createFileAbsolute("/Users/jackkilrain/Desktop/Projects/zig/Flow/out.log", .{ .truncate = false });
+pub fn logToFile(comptime fmt: []const u8, args: anytype) !void {
+    const file = std.fs.cwd().openFile("/Users/jackkilrain/Desktop/Projects/zig/Flow/out.log", .{ .mode = .read_write }) catch return;
     defer file.close();
-    const string = try std.fmt.allocPrint(allocator, fmt, args);
-    defer allocator.free(string);
-    try file.writeAll(string);
+    file.seekFromEnd(0) catch return;
+    file.writer().print(fmt, args) catch return;
 }

@@ -81,7 +81,7 @@ pub const Flow = struct {
             .tty = try vaxis.Tty.init(),
             .vx = try vaxis.init(allocator, .{}),
             .mouse = null,
-            .buffer = try FileBuffer.init(allocator, file_path),
+            .buffer = try FileBuffer.initFromFile(allocator, file_path),
             .mode = TextMode.NORMAL,
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
@@ -324,7 +324,7 @@ pub const Flow = struct {
             vaxis.Key.enter => {
                 std.log.err("KEY: '\\n'", .{});
                 std.log.err("Line count before: {d}", .{self.window_lines.items.len});
-                try self.buffer.insert(self.cursor_offset, &.{'\n'});
+                try self.buffer.insert(self.cursor_offset, "\n");
                 self.clearWindowLines();
                 _ = try self.cacheWindowLines();
                 std.log.err("Line count after: {d}", .{self.window_lines.items.len});
@@ -375,23 +375,25 @@ pub const Flow = struct {
                 }
                 // Backward delete
                 try self.buffer.delete(self.cursor_offset - 1, 1);
-                const current_cursor_col = self.vx.screen.cursor_col;
+                // const current_cursor_col = self.vx.screen.cursor_col;
                 try self.shiftCursorCol(-1);
-                if (current_cursor_col > 0) {
-                    const line = self.getCurrentLine();
-                    _ = line.orderedRemove(current_cursor_col - 1);
-                } else {
-                    // TODO: Make this merge the current and previous lines in
-                    //       the window lines cache instead of refreshing the
-                    //       cache. We should only need to refresh during a visual
-                    //       selection delete
-
-                    // At start of line, which will merge this line with
-                    // the previous. Thus it is easier to just regen window
-                    // lines cache
-                    self.clearWindowLines();
-                    _ = try self.cacheWindowLines();
-                }
+                self.clearWindowLines();
+                _ = try self.cacheWindowLines();
+                // if (current_cursor_col > 0) {
+                //     const line = self.getCurrentLine();
+                //     _ = line.orderedRemove(current_cursor_col - 1);
+                // } else {
+                //     // TODO: Make this merge the current and previous lines in
+                //     //       the window lines cache instead of refreshing the
+                //     //       cache. We should only need to refresh during a visual
+                //     //       selection delete
+                //
+                //     // At start of line, which will merge this line with
+                //     // the previous. Thus it is easier to just regen window
+                //     // lines cache
+                //     self.clearWindowLines();
+                //     _ = try self.cacheWindowLines();
+                // }
             },
             vaxis.Key.left => {
                 std.log.err("KEY: left", .{});

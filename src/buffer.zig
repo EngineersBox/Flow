@@ -103,20 +103,16 @@ pub const FileBuffer = struct {
     buffer_line_range_indicies: ?Range,
     meta: FileMeta,
 
-    fn pieceTableFromFile(allocator: std.mem.Allocator, file_path: []const u8) !struct { []const u8, PieceTable } {
-        const file: std.fs.File = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
-        defer file.close();
-        const stats: std.fs.File.Stat = try file.stat();
-        if (stats.size > MaxFileSize) {
-            return error.FileTooLarge;
-        }
-        const buffer: []u8 = try file.readToEndAlloc(allocator, @intCast(stats.size));
-        return .{ buffer, try PieceTable.init(allocator, buffer) };
-    }
-
-    pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !FileBuffer {
+    pub fn initFromFile(allocator: std.mem.Allocator, file_path: []const u8) !@This() {
         const buf_and_piecetable: struct { []const u8, PieceTable } = try FileBuffer.pieceTableFromFile(allocator, file_path);
         return .{ .file_buffer = buf_and_piecetable[0], .piecetable = buf_and_piecetable[1], .file_path = file_path, .allocator = allocator, .buffer_offset_range_indicies = null, .buffer_line_range_indicies = null, .meta = .{ .lines = std.mem.count(u8, buf_and_piecetable[0], "\n") + 1, .size = buf_and_piecetable[0].len } };
+    }
+
+    /// This takes ownership of the buffer, including freeing it when necessary
+    pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []u8) !@This() {
+        const piecetable = try PieceTable.init(allocator, buffer);
+        const formatted_buffer = try formatNewlines(allocator, buffer);
+        return .{ .file_buffer = formatted_buffer, .piecetable = piecetable, .file_path = [0]u8{}, .allocator = allocator, .buffer_offset_range_indicies = null, .buffer_line_range_indicies = null, .meta = .{ .lines = std.mem.count(u8, formatted_buffer, "\n") + 1, .size = formatted_buffer.len } };
     }
 
     pub fn deinit(self: *@This()) void {
@@ -124,10 +120,34 @@ pub const FileBuffer = struct {
         self.allocator.free(self.file_buffer);
     }
 
+    fn formatNewlines(allocator: std.mem.Allocator, buffer: []u8) ![]u8 {
+        const new_buffer = try allocator.alloc(u8, buffer.len);
+        const replace_count = std.mem.replace(u8, buffer, "\r\n", "\n", new_buffer);
+        if (!allocator.resize(new_buffer, buffer.len - replace_count)) {
+            return error.ResizeFormattedBufferFailed;
+        }
+        allocator.free(buffer);
+        return new_buffer;
+    }
+
+    fn pieceTableFromFile(allocator: std.mem.Allocator, file_path: []const u8) !struct { []const u8, PieceTable } {
+        const file: std.fs.File = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
+        defer file.close();
+        const stats: std.fs.File.Stat = try file.stat();
+        if (stats.size > MaxFileSize) {
+            return error.FileTooLarge;
+        }
+        var buffer: []u8 = try file.readToEndAlloc(allocator, @intCast(stats.size));
+        buffer = try formatNewlines(allocator, buffer);
+        return .{ buffer, try PieceTable.init(allocator, buffer) };
+    }
+
     pub fn insert(self: *@This(), index: usize, bytes: []const u8) error{ OutOfBounds, OutOfMemory }!void {
         if (bytes.len == 0) {
             return;
         }
+        std.log.err("Bytes {s} Len: {d}", .{ bytes, bytes.len });
+        std.log.err("[FileBuffer] Insert before [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
         try self.piecetable.insert(index, bytes);
         const lines: usize = std.mem.count(u8, bytes, "\n");
         self.meta.lines += lines;
@@ -135,9 +155,11 @@ pub const FileBuffer = struct {
         if (self.meta.lines < self.buffer_line_range_indicies.?.maxEnd()) {
             self.buffer_line_range_indicies.?.end += lines;
             self.buffer_offset_range_indicies.?.end += bytes.len;
+            std.log.err("[FileBuffer] Insert extend after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
         } else if (index > self.buffer_offset_range_indicies.?.end) {
             // Past the window, nothing to update
+            std.log.err("[FileBuffer] Insert past after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
         } else if (lines == 0) {
             // No newlines, just update offsets
@@ -145,6 +167,7 @@ pub const FileBuffer = struct {
                 self.buffer_offset_range_indicies.?.start += bytes.len;
             }
             self.buffer_offset_range_indicies.?.end += bytes.len;
+            std.log.err("[FileBuffer] Insert no newlines after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
         }
         // At least one line added
@@ -157,6 +180,7 @@ pub const FileBuffer = struct {
             }
         }
         if (index >= self.buffer_offset_range_indicies.?.start) {
+            std.log.err("[FileBuffer] Insert {d} newline end only after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ lines, self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
         }
         self.buffer_offset_range_indicies.?.start += bytes.len;
@@ -174,9 +198,11 @@ pub const FileBuffer = struct {
             // of the desired line.
             self.buffer_offset_range_indicies.?.start += 1;
         }
+        std.log.err("[FileBuffer] Insert {d} newline after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ lines, self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
     }
 
     pub fn append(self: *@This(), bytes: []const u8) error{OutOfMemory}!void {
+        std.log.err("[FileBuffer] Append before [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
         try self.piecetable.append(bytes);
         const lines = std.mem.count(u8, bytes, "\n");
         self.meta.lines += lines;
@@ -185,9 +211,11 @@ pub const FileBuffer = struct {
         if (self.meta.lines < self.buffer_line_range_indicies.?.maxEnd()) {
             self.buffer_line_range_indicies.?.end += lines;
             self.buffer_offset_range_indicies.?.end += bytes.len;
+            std.log.err("[FileBuffer] Append extend after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
         } else if (prev_size -| 1 > self.buffer_offset_range_indicies.?.end) {
             // Past the window, nothing to update
+            std.log.err("[FileBuffer] Append past after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
         } else if (lines == 0) {
             // No newlines, just update offsets
@@ -195,6 +223,7 @@ pub const FileBuffer = struct {
                 self.buffer_offset_range_indicies.?.start += bytes.len;
             }
             self.buffer_offset_range_indicies.?.end += bytes.len;
+            std.log.err("[FileBuffer] Append no newlines after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
         }
         // At least one line added
@@ -206,6 +235,7 @@ pub const FileBuffer = struct {
                 newlines_to_go_back -= 1;
             }
         }
+        std.log.err("[FileBuffer] Append {d} newlines after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ lines, self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
     }
 
     pub fn set(self: *@This(), index: usize, value: u8) error{ OutOfBounds, OutOfMemory }!u8 {
@@ -253,9 +283,6 @@ pub const FileBuffer = struct {
     }
 
     fn deleteAfterWindow(self: *@This(), index: usize, length: usize) error{ OutOfBounds, OutOfMemory }!void {
-        if (index + length > self.meta.size) {
-            return error.OutOfBounds;
-        }
         var iterator = FileBufferIterator.init(self.allocator, self.piecetable, index, index + length);
         var lines: usize = 0;
         var current_offset = index;
@@ -269,9 +296,7 @@ pub const FileBuffer = struct {
     }
 
     fn deleteAfterWindowStart(self: *@This(), index: usize, length: usize) error{ OutOfBounds, OutOfMemory }!void {
-        if (index + length > self.meta.size) {
-            return error.OutOfBounds;
-        }
+        std.log.err("Delete index: {d}", .{index});
         var offset = self.buffer_offset_range_indicies.?.start;
         var lines_from_start_to_index: usize = 0;
         while (offset <= index) : (offset += 1) {
@@ -279,35 +304,56 @@ pub const FileBuffer = struct {
                 lines_from_start_to_index += 1;
             }
         }
+        if (index == self.buffer_offset_range_indicies.?.start) {
+            offset = index;
+        }
         var lines: usize = 0;
         while (offset < index + length) : (offset += 1) {
             if (try self.get(offset) == '\n') {
                 lines += 1;
             }
         }
+        std.log.err("Before delete", .{});
+        var iter = FileBufferIterator.init(self.allocator, self.piecetable, 0, null);
+        while (try iter.next()) |line| {
+            std.log.err("Line: {s}", .{line.items});
+            line.deinit();
+        }
         try self.piecetable.delete(index, length);
-        self.meta.lines -= lines;
-        self.meta.size -= length;
+        std.log.err("After delete", .{});
+        self.meta.lines -|= lines;
+        self.meta.size -|= length;
+        iter = FileBufferIterator.init(self.allocator, self.piecetable, 0, null);
+        while (try iter.next()) |line| {
+            std.log.err("Line: {s}", .{line.items});
+            line.deinit();
+        }
+        std.log.err("Meta [Lines: {d}] [Size: {d}]", .{ self.meta.lines, self.meta.size });
         self.buffer_offset_range_indicies.?.end = index;
         var lines_to_add_to_end = (self.buffer_line_range_indicies.?.end - self.buffer_line_range_indicies.?.start) - lines_from_start_to_index;
-        self.buffer_line_range_indicies.?.end = self.buffer_line_range_indicies.?.end - lines_from_start_to_index;
+        std.log.err("Lines to add to end: {d}", .{lines_to_add_to_end});
+        self.buffer_line_range_indicies.?.end = self.buffer_line_range_indicies.?.start;
         offset = index;
         var lines_added: usize = 0;
-        while (lines_to_add_to_end > 0 and offset < self.meta.size - 1) : (offset += 1) {
-            const char = self.get(offset) catch break;
+        while (lines_to_add_to_end > 0) : (offset += 1) {
+            std.log.err("To add {d} > 0, offset: {d}", .{ lines_to_add_to_end, offset });
+            const char = self.get(offset) catch {
+                std.log.err("Failed to get char", .{});
+                break;
+            };
+            std.log.err("Char: {d} Offset: {d}", .{ char, offset });
             if (char == '\n') {
                 lines_to_add_to_end -= 1;
                 lines_added += 1;
+                std.log.err("Newline", .{});
             }
         }
+        std.log.err("Lines added: {d} Offset: {d}", .{ lines_added, offset });
         self.buffer_offset_range_indicies.?.end = offset;
         self.buffer_line_range_indicies.?.end += lines_added;
     }
 
-    fn deleteBeforeWindowStart(self: *@This(), index: usize, length: usize) error{ StartExceedsSize, OutOfBounds, OutOfMemory }!void {
-        if (index + length > self.meta.size) {
-            return error.OutOfBounds;
-        }
+    fn deleteBeforeWindowStart(self: *@This(), index: usize, length: usize) error{ OutOfBounds, OutOfMemory }!void {
         var offset = index;
         var start_adjument_lines: usize = 0;
         var lines: usize = 0;
@@ -335,24 +381,31 @@ pub const FileBuffer = struct {
         try self.setBufferWindow(offset, self.buffer_offset_range_indicies.?.max_diff.?);
     }
 
-    pub fn delete(self: *@This(), index: usize, length: usize) error{ StartExceedsSize, OutOfBounds, OutOfMemory }!void {
+    pub fn delete(self: *@This(), index: usize, length: usize) error{ OutOfBounds, OutOfMemory }!void {
+        if (index + length > self.meta.size) {
+            return error.OutOfBounds;
+        }
+        std.log.err("[FileBuffer] Delete before [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
         if (index > self.buffer_offset_range_indicies.?.end) {
             try self.deleteAfterWindow(index, length);
+            std.log.err("[FileBuffer] Delete past window after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
-        } else if (index > self.buffer_offset_range_indicies.?.start) {
+        } else if (index >= self.buffer_offset_range_indicies.?.start) {
             try self.deleteAfterWindowStart(index, length);
+            std.log.err("[FileBuffer] Delete past start after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
             return;
         }
         try self.deleteBeforeWindowStart(index, length);
+        std.log.err("[FileBuffer] Delete before start after [Line: {d}-{d} | {d}] [Offset: {d}-{d}]", .{ self.buffer_line_range_indicies.?.start, self.buffer_line_range_indicies.?.end, self.buffer_line_range_indicies.?.max_diff.?, self.buffer_offset_range_indicies.?.start, self.buffer_offset_range_indicies.?.end });
     }
 
     /// Discard existing window and create a new one
-    pub fn setBufferWindow(self: *@This(), start: usize, height: usize) error{StartExceedsSize}!void {
+    pub fn setBufferWindow(self: *@This(), start: usize, height: usize) error{OutOfBounds}!void {
         var start_offset: usize = 0;
         var start_lines: usize = 0;
         while (start_lines < start) : (start_offset += 1) {
             const char: u8 = self.piecetable.get(@intCast(start_offset)) catch {
-                return error.StartExceedsSize;
+                return error.OutOfBounds;
             };
             if (std.mem.eql(u8, &.{char}, "\n")) {
                 start_lines += 1;
@@ -490,6 +543,9 @@ pub const FileBuffer = struct {
     }
 
     pub fn save(self: *@This()) !void {
+        if (self.file_path.len == 0) {
+            return error.NoFilePathForBufferLiteral;
+        }
         const file: std.fs.File = try std.fs.createFileAbsolute(self.file_path, .{ .mode = 0o666, .read = false, .truncate = true });
         var iterator: FileBufferIterator = try self.lineIterator();
         while (try iterator.next()) |slice| {

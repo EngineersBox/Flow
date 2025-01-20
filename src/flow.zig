@@ -10,6 +10,7 @@ const Range = fb.Range;
 const logToFile = @import("log.zig").logToFile;
 const TreeSitter = @import("lang.zig").TreeSitter;
 const Config = @import("config.zig");
+const zts = @import("zts");
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
 /// panics occur
@@ -66,6 +67,7 @@ pub const Flow = struct {
     window_lines: std.ArrayList(std.ArrayList(u8)),
     tree_sitter: ?TreeSitter,
     cursor_offset: usize,
+    needs_reparse: bool,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
         var extension: []const u8 = std.fs.path.extension(file_path);
@@ -88,10 +90,11 @@ pub const Flow = struct {
             .window_lines = std.ArrayList(std.ArrayList(u8)).init(allocator),
             .tree_sitter = try TreeSitter.initFromFileExtension(extension),
             .cursor_offset = 0,
+            .needs_reparse = false,
         };
     }
 
-    pub fn deinit(self: *Flow) void {
+    pub fn deinit(self: *@This()) void {
         self.vx.deinit(self.allocator, self.tty.anyWriter());
         self.tty.deinit();
         self.buffer.deinit();
@@ -102,7 +105,7 @@ pub const Flow = struct {
         self.allocator.free(self.tab_spaces_buffer);
     }
 
-    pub fn run(self: *Flow) !void {
+    pub fn run(self: *@This()) !void {
         // Initialize our event loop. This particular loop requires intrusive init
         var loop: vaxis.Loop(Event) = .{
             .tty = &self.tty,
@@ -114,6 +117,17 @@ pub const Flow = struct {
         try self.vx.queryTerminal(self.tty.anyWriter(), 5 * std.time.ns_per_s);
         try self.vx.setMouseMode(self.tty.anyWriter(), true);
         try self.setBufferWindow(0, @intCast(self.vx.screen.height));
+        if (self.tree_sitter != null) {
+            // Parse the loaded buffer
+            var buffer = std.ArrayList(u8).init(self.allocator);
+            var iter = try self.buffer.lineIterator();
+            while (try iter.next()) |line| {
+                try buffer.appendSlice(line.items);
+                line.deinit();
+            }
+            try self.tree_sitter.?.parseBuffer(buffer.items);
+            buffer.deinit();
+        }
         while (!self.should_quit) {
             // pollEvent blocks until we have an event
             loop.pollEvent();
@@ -126,7 +140,7 @@ pub const Flow = struct {
         }
     }
 
-    fn handleModeNormal(self: *Flow, key: vaxis.Key) !void {
+    fn handleModeNormal(self: *@This(), key: vaxis.Key) !void {
         if (key.matches(';', .{})) {
             self.mode = TextMode.COMMAND;
             return;
@@ -149,13 +163,13 @@ pub const Flow = struct {
         }
     }
 
-    fn setBufferWindow(self: *Flow, start: usize, height: usize) !void {
+    fn setBufferWindow(self: *@This(), start: usize, height: usize) !void {
         self.clearWindowLines();
         try self.buffer.setBufferWindow(start, height);
         _ = try self.cacheWindowLines();
     }
 
-    fn updateBufferWindow(self: *Flow, offset_row: isize) !bool {
+    fn updateBufferWindow(self: *@This(), offset_row: isize) !bool {
         if (offset_row < 0 and self.buffer.buffer_offset_range_indicies.?.start < @abs(offset_row)) {
             return false;
         } else if (offset_row > 0 and self.buffer.meta.size - 1 - self.buffer.buffer_offset_range_indicies.?.end < @abs(offset_row)) {
@@ -167,7 +181,7 @@ pub const Flow = struct {
         return new_window_valid;
     }
 
-    fn clearWindowLines(self: *Flow) void {
+    fn clearWindowLines(self: *@This()) void {
         for (self.window_lines.items) |line| {
             line.deinit();
         }
@@ -175,22 +189,22 @@ pub const Flow = struct {
     }
 
     /// Returns true when lines are cached, false if cache already exists
-    fn cacheWindowLines(self: *Flow) !bool {
+    fn cacheWindowLines(self: *@This()) !bool {
         if (self.window_lines.items.len != 0) {
             return false;
         }
-        var line_iterator: FileBufferIterator = try self.buffer.lineIterator();
+        var line_iterator: FileBufferIterator = try self.buffer.windowLineIterator();
         while (try line_iterator.next()) |line| {
             try self.window_lines.append(line);
         }
         return true;
     }
 
-    inline fn getCurrentLine(self: *Flow) *std.ArrayList(u8) {
+    inline fn getCurrentLine(self: *@This()) *std.ArrayList(u8) {
         return @as(*std.ArrayList(u8), &self.window_lines.items[self.vx.screen.cursor_row]);
     }
 
-    inline fn confineCursorToCurrentLine(self: *Flow, clamp: ClampMode) void {
+    inline fn confineCursorToCurrentLine(self: *@This(), clamp: ClampMode) void {
         const current_line_editable_end = switch (self.mode) {
             TextMode.INSERT => self.getCurrentLine().items.len -| 1,
             else => self.getCurrentLine().items.len -| 2,
@@ -208,7 +222,7 @@ pub const Flow = struct {
         }
     }
 
-    fn shiftCursorCol(self: *Flow, offset_col: isize) !void {
+    fn shiftCursorCol(self: *@This(), offset_col: isize) !void {
         const line: *const std.ArrayList(u8) = self.getCurrentLine();
         const current_line_end = switch (self.mode) {
             TextMode.INSERT => blk: {
@@ -257,7 +271,7 @@ pub const Flow = struct {
         );
     }
 
-    fn adjustCursorOffset(self: *Flow, prev_row: usize, prev_col: usize) void {
+    fn adjustCursorOffset(self: *@This(), prev_row: usize, prev_col: usize) void {
         const new_row = self.vx.screen.cursor_row;
         const new_col = self.vx.screen.cursor_col;
         const new_row_len = self.window_lines.items[new_row].items.len;
@@ -273,7 +287,7 @@ pub const Flow = struct {
         self.cursor_offset += new_col;
     }
 
-    fn shiftCursorRow(self: *Flow, offset_row: isize, clamp: ClampMode) !void {
+    fn shiftCursorRow(self: *@This(), offset_row: isize, clamp: ClampMode) !void {
         var new_row: isize = @intCast(self.vx.screen.cursor_row);
         new_row += offset_row;
         if (new_row >= 0 and new_row < self.window_lines.items.len) {
@@ -297,15 +311,21 @@ pub const Flow = struct {
         self.adjustCursorOffset(prev_row, prev_col);
     }
 
-    fn handleModeInsert(self: *Flow, key: vaxis.Key) !void {
+    fn handleModeInsert(self: *@This(), key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.enter => {
                 try self.buffer.insert(self.cursor_offset, "\n");
+                // if (self.tree_sitter) |tree| {
+                //     const edit = zts.InputEdit{
+                //         .start_point = .{ .column = self.vx.screen.cursor_col, .row = self.buffer.buffer_line_range_indicies.?.start + self.vx.screen.cursor_row },
+                //         .start_byte = '\n',
+                //     };
+                //     tree.tree.?.edit(&edit);
+                // }
                 self.clearWindowLines();
                 _ = try self.cacheWindowLines();
                 // Move cursor to start of next row
-                try self.shiftCursorCol(-@as(isize, @intCast(self.vx.screen.cursor_col)));
-                try self.shiftCursorRow(1, ClampMode.NONE);
+                try self.shiftCursorRow(1, ClampMode.START);
             },
             vaxis.Key.space...0x7E,
             0x80...0xFF,
@@ -386,13 +406,14 @@ pub const Flow = struct {
                 return;
             },
         }
+        self.needs_reparse = true;
     }
 
-    fn handleModeVisual(_: *Flow, _: vaxis.Key) !void {
+    fn handleModeVisual(_: *@This(), _: vaxis.Key) !void {
         // TODO: Implement this
     }
 
-    fn handleModeCommand(self: *Flow, key: vaxis.Key) !void {
+    fn handleModeCommand(self: *@This(), key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.escape => self.mode = TextMode.NORMAL,
             'q' => self.should_quit = true,
@@ -415,7 +436,7 @@ pub const Flow = struct {
     }
 
     /// Update our application state from an event
-    pub fn update(self: *Flow, event: Event) !void {
+    pub fn update(self: *@This(), event: Event) !void {
         switch (event) {
             .key_press => |key| try switch (self.mode) {
                 TextMode.NORMAL => self.handleModeNormal(key),
@@ -447,33 +468,36 @@ pub const Flow = struct {
         return line.len;
     }
 
-    fn drawLine(self: *Flow, line: []const u8, y_offset: usize, window: vaxis.Window) !void {
-        if (self.tree_sitter == null) {
-            const width: usize = lineWidth(line, window.width);
-            const child: vaxis.Window = window.child(.{
-                .x_off = 0,
-                .y_off = y_offset,
-                .width = .{ .limit = width },
-                .height = .{ .limit = 1 },
-            });
-            _ = try child.printSegment(.{ .text = line, .style = .{
-                .bg = colours.BLACK,
-                .fg = colours.WHITE,
-                .reverse = false,
-            } }, .{});
-            return;
-        }
-        try self.tree_sitter.?.parseString(line);
-        _ = self.tree_sitter.?.tree.?.rootNode();
+    fn drawLine(line: []const u8, y_offset: usize, window: vaxis.Window) !void {
+        const width: usize = lineWidth(line, window.width);
+        const child: vaxis.Window = window.child(.{
+            .x_off = 0,
+            .y_off = y_offset,
+            .width = .{ .limit = width },
+            .height = .{ .limit = 1 },
+        });
+        _ = try child.printSegment(.{ .text = line, .style = .{
+            .bg = colours.BLACK,
+            .fg = colours.WHITE,
+            .reverse = false,
+        } }, .{});
+        return;
     }
 
     /// Draw our current state
-    pub fn draw(self: *Flow) !void {
+    pub fn draw(self: *@This()) !void {
         const window: vaxis.Window = self.vx.window();
         window.clear();
         self.vx.setMouseShape(.default);
-        for (self.window_lines.items, 0..) |line, y_offset| {
-            try self.drawLine(line.items, y_offset, window);
+        // BUG: For some reason, using an if to unwrap an optional
+        //      makes it a constant value and not variable (which is
+        //      needed here).
+        if (self.tree_sitter != null) {
+            try self.tree_sitter.?.drawBuffer(window, 0, 0, 0);
+        } else {
+            for (self.window_lines.items, 0..) |line, y_offset| {
+                try drawLine(line.items, y_offset, window);
+            }
         }
         const cursor_pos_buffer: []u8 = try std.fmt.allocPrint(self.allocator, "{d} | {d}:{d}", .{ self.cursor_offset, self.vx.screen.cursor_row, self.vx.screen.cursor_col });
         defer self.allocator.free(cursor_pos_buffer);

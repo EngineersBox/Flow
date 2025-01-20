@@ -1,5 +1,47 @@
 const std = @import("std");
 const zts = @import("zts");
+const vaxis = @import("vaxis");
+const colours = @import("colours.zig");
+const logToFile = @import("log.zig").logToFile;
+
+pub const TreeIterator = struct {
+    cursor: zts.TreeCursor,
+    vistied_children: bool,
+    yielded: bool,
+
+    pub fn init(node: zts.Node) TreeIterator {
+        return .{
+            .cursor = zts.TreeCursor.init(node),
+            .vistied_children = false,
+            .yielded = false,
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.cursor.deinit();
+    }
+
+    pub fn next(self: *@This()) ?zts.Node {
+        while (true) {
+            if (self.yielded) {
+                self.yielded = false;
+                if (!self.cursor.gotoFirstChild()) {
+                    self.vistied_children = true;
+                }
+                continue;
+            }
+            if (!self.vistied_children) {
+                self.yielded = true;
+                return self.cursor.currentNode();
+            } else if (self.cursor.gotoNextSibling()) {
+                self.vistied_children = false;
+            } else if (!self.cursor.gotoParent()) {
+                break;
+            }
+        }
+        return null;
+    }
+};
 
 const file_extension_languages = std.StaticStringMap(zts.LanguageGrammar).initComptime(.{
     .{ "sh", zts.LanguageGrammar.bash },
@@ -84,6 +126,7 @@ pub const TreeSitter = struct {
     language: *const zts.Language,
     parser: *zts.Parser,
     tree: ?*zts.Tree,
+    line: usize,
 
     pub fn initFromFileExtension(extension: []const u8) !?TreeSitter {
         const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
@@ -99,14 +142,65 @@ pub const TreeSitter = struct {
             .language = language,
             .parser = parser,
             .tree = null,
+            .line = 0,
         };
     }
 
-    pub fn deinit(self: *TreeSitter) void {
+    pub fn deinit(self: *@This()) void {
         self.parser.deinit();
     }
 
-    pub fn parseString(self: *TreeSitter, string: []const u8) !void {
-        self.tree = try self.parser.parseString(self.tree, string);
+    pub fn parseBuffer(self: *@This(), buffer: []const u8) !void {
+        self.tree = try self.parser.parseString(self.tree, buffer);
+    }
+
+    inline fn lineWidth(line: []const u8, window_width: usize) usize {
+        if (line.len > window_width) {
+            return window_width;
+        } else if (line.len > 1 and std.mem.eql(u8, line[line.len - 1 ..], "\n")) {
+            return line.len - 1;
+        }
+        return line.len;
+    }
+
+    // TODO: Move this elsewhere, it belongs somewhere that centralises
+    //       rendering operations together.
+    fn drawLine(self: *@This(), line: []const u8, y_offset: usize, window: vaxis.Window) !void {
+        const new_tree = try self.parser.parseString(self.tree, line);
+        if (self.tree) |old_tree| {
+            old_tree.deinit();
+        }
+        self.tree = new_tree;
+        const root = self.tree.?.rootNode();
+        try logToFile("{s}\n", .{root.toString()});
+        const width: usize = lineWidth(line, window.width);
+        const child: vaxis.Window = window.child(.{
+            .x_off = 0,
+            .y_off = y_offset,
+            .width = .{ .limit = width },
+            .height = .{ .limit = 1 },
+        });
+        _ = try child.printSegment(.{ .text = line, .style = .{
+            .bg = colours.BLACK,
+            .fg = colours.WHITE,
+            .reverse = false,
+        } }, .{});
+    }
+
+    pub fn drawBuffer(self: *@This(), _: vaxis.Window, window_start_offset: usize, window_width: usize, window_height: usize) !void {
+        const root = self.tree.?.rootNodeWithOffset(@intCast(window_start_offset), .{
+            .row = @intCast(window_width),
+            .column = @intCast(window_height),
+        });
+        var iter = TreeIterator.init(root);
+        // var line: u32 = 0;
+        while (iter.next()) |node| {
+            const point = node.getStartPoint();
+            // while (line <= current_line) : (line += 1) {
+            //     try logToFile("\n", .{});
+            // }
+            try logToFile("{s} {d}:{d}\n", .{ node.getType(), point.column, point.row });
+        }
+        return error.DebugError;
     }
 };

@@ -187,19 +187,36 @@ pub const TreeSitter = struct {
         } }, .{});
     }
 
-    pub fn drawBuffer(self: *@This(), _: vaxis.Window, window_start_offset: usize, window_width: usize, window_height: usize) !void {
+    pub fn drawBuffer(self: *@This(), lines: *std.ArrayList(std.ArrayList(u8)), _: vaxis.Window, window_start_offset: usize, window_width: usize, window_height: usize) !void {
         const root = self.tree.?.rootNodeWithOffset(@intCast(window_start_offset), .{
             .row = @intCast(window_width),
             .column = @intCast(window_height),
         });
         var iter = TreeIterator.init(root);
-        // var line: u32 = 0;
+        var line: u32 = 0;
+        var col: u32 = 0;
         while (iter.next()) |node| {
-            const point = node.getStartPoint();
-            // while (line <= current_line) : (line += 1) {
-            //     try logToFile("\n", .{});
-            // }
-            try logToFile("{s} {d}:{d}\n", .{ node.getType(), point.column, point.row });
+            const start = node.getStartPoint();
+            if (line != start.row) {
+                while (line < start.row) : (line += 1) {
+                    try logToFile("\n", .{});
+                }
+                col = 0;
+            } else {
+                // NOTE: After converting to render code, this can be
+                //       just an allocated array with a @memset
+                while (col < start.column) : (col += 1) {
+                    try logToFile(" ", .{});
+                }
+            }
+            const end = node.getEndPoint();
+            if (node.isNamed()) {
+                const string = lines.items[line];
+                try logToFile("{s}", .{string.items[start.column..end.column]});
+            } else {
+                try logToFile("{s}", .{node.getType()});
+            }
+            col += end.column;
         }
         return error.DebugError;
     }

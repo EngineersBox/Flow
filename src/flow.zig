@@ -493,7 +493,16 @@ pub const Flow = struct {
         //      makes it a constant value and not variable (which is
         //      needed here).
         if (self.tree_sitter != null) {
-            try self.tree_sitter.?.drawBuffer(window, 0, 0, 0);
+            var lines = std.ArrayList(std.ArrayList(u8)).init(self.allocator);
+            var iter = try self.buffer.lineIterator();
+            while (try iter.next()) |line| {
+                try lines.append(line);
+            }
+            try self.tree_sitter.?.drawBuffer(&lines, window, 0, 0, 0);
+            for (lines.items) |line| {
+                line.deinit();
+            }
+            lines.deinit();
         } else {
             for (self.window_lines.items, 0..) |line, y_offset| {
                 try drawLine(line.items, y_offset, window);

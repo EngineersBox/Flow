@@ -6,6 +6,7 @@ const logToFile = @import("log.zig").logToFile;
 const Pool = @import("zap");
 const config = @import("config.zig");
 const known_folders = @import("known-folders");
+const json = @import("json");
 
 pub const TreeIterator = struct {
     cursor: zts.TreeCursor,

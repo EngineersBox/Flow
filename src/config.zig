@@ -1,5 +1,6 @@
 const std = @import("std");
 const toml = @import("zig-toml");
+const json = @import("json");
 const known_folders = @import("known-folders");
 
 pub const TREE_SITTER_QUERIES_PATH: []const u8 = "/flow/queries/";

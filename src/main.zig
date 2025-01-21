@@ -1,6 +1,12 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
+const KnownFolders = @import("known-folders");
 const Flow = @import("flow.zig").Flow;
+
+pub const KnownFolderConfig = struct {
+    xdg_force_default: bool = false,
+    xdg_on_mac: bool = true,
+};
 
 /// Keep our main function small. Typically handling arg parsing and initialization only
 pub fn main() !void {

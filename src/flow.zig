@@ -88,7 +88,7 @@ pub const Flow = struct {
             .cursor_blink_ns = 8 * std.time.ns_per_ms,
             .previous_draw = 0,
             .window_lines = std.ArrayList(std.ArrayList(u8)).init(allocator),
-            .tree_sitter = try TreeSitter.initFromFileExtension(extension),
+            .tree_sitter = try TreeSitter.initFromFileExtension(allocator, extension),
             .cursor_offset = 0,
             .needs_reparse = false,
         };

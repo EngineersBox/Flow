@@ -3,7 +3,9 @@ const zts = @import("zts");
 const vaxis = @import("vaxis");
 const colours = @import("colours.zig");
 const logToFile = @import("log.zig").logToFile;
-const Zap = @import("zap");
+const Pool = @import("zap");
+const config = @import("config.zig");
+const known_folders = @import("known-folders");
 
 pub const TreeIterator = struct {
     cursor: zts.TreeCursor,
@@ -123,27 +125,53 @@ fn loadGrammar(grammar: zts.LanguageGrammar) !*const zts.Language {
     unreachable;
 }
 
+// pub const Queries = struct {
+//     elems: std.HashMap([]const u8, []const u8),
+//
+//     pub fn init(allocator: std.mem.Allocator, grammar: zts.LanguageGrammar) @This() {
+//         var path = try known_folders.getPath(allocator, .roaming_configuration) orelse return error.QueriesNotFound;
+//         const prev_path_pen = path.len;
+//         const highlight_file = config.TREE_SITTER_QUERIES_PATH ++ @tagName(grammar) ++ "/highlights.scm";
+//         if (!allocator.resize(path, path.len + highlight_file.len)) {
+//             return error.OutOfMemory;
+//         }
+//         defer allocator.free(path);
+//         @memcpy(path[prev_path_pen], highlight_file);
+//         return .{
+//
+//         };
+//     }
+//
+// };
+
 pub const TreeSitter = struct {
+    allocator: std.mem.Allocator,
     language: *const zts.Language,
     parser: *zts.Parser,
     tree: ?*zts.Tree,
+    // queries: Queries,
     line: usize,
+    render_thread_pool: Pool,
 
-    pub fn initFromFileExtension(extension: []const u8) !?TreeSitter {
+    pub fn initFromFileExtension(allocator: std.mem.Allocator, extension: []const u8) !?TreeSitter {
         const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
             return null;
         };
-        return try TreeSitter.init(try loadGrammar(grammar));
+        return try TreeSitter.init(allocator, try loadGrammar(grammar));
     }
 
-    pub fn init(language: *const zts.Language) !TreeSitter {
+    pub fn init(allocator: std.mem.Allocator, language: *const zts.Language) !TreeSitter {
         const parser = try zts.Parser.init();
         try parser.setLanguage(language);
+        // const queries = Queries.init();
         return .{
+            .allocator = allocator,
             .language = language,
             .parser = parser,
             .tree = null,
+            // .queries = queries,
             .line = 0,
+            .render_thread_pool = Pool.init(@max(1, std.Thread.getCpuCount() catch 1)),
         };
     }
 
@@ -188,15 +216,33 @@ pub const TreeSitter = struct {
         } }, .{});
     }
 
+    // fn drawHighlights(self: *@This()) void {
+    //     const Work = struct {
+    //         task: Pool.Task = .{ .callback = @This().callback },
+    //         wg: *std.Thread.WaitGroup,
+    //
+    //         fn callback(task: *Pool.Task) void {
+    //             const task_self: *@This() = @alignCast(@fieldParentPtr("task", task));
+    //             task_self.wg.finish();
+    //         }
+    //     };
+    // }
+
     pub fn drawBuffer(self: *@This(), lines: *std.ArrayList(std.ArrayList(u8)), _: vaxis.Window, window_start_offset: usize, window_offset_width: usize, window_offset_height: usize, window_height: usize, end_pos: usize) !void {
         const root = self.tree.?.rootNodeWithOffset(@intCast(window_start_offset), .{
             .row = @intCast(window_offset_width),
             .column = @intCast(window_offset_height),
         });
         var iter = TreeIterator.init(root);
-        var query = try zts.Query.init(self.language, "(function_declaration name: (identifier) @function)");
+        const hl_file = try std.fs.openFileAbsolute("/Users/jackkilrain/.config/flow/queries/zig/highlights.scm", .{ .mode = .read_only });
+        defer hl_file.close();
+        const hl_queries = try hl_file.readToEndAlloc(self.allocator, 1024 * 1024 * 1024);
+        defer self.allocator.free(hl_queries);
+        var query = try zts.Query.init(self.language, hl_queries);
+        // var query = try zts.Query.init(self.language, "(function_declaration name: (identifier) @function)");
         _ = query.captureCount();
         _ = query.stringCount();
+        _ = query.patternCount();
         _ = query.startByteForPattern(0);
         _ = query.endByteForPattern(50);
         var cursor = try zts.QueryCursor.init();
@@ -205,56 +251,61 @@ pub const TreeSitter = struct {
         cursor.setByteRange(0, @intCast(end_pos));
         cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(window_height), .column = 0 });
         var match: zts.QueryMatch = undefined;
-        if (cursor.nextMatch(&match)) {
-            if (match.capture_count > 0) {
-                const node = match.captures.node;
-                const start = node.getStartPoint();
-                const end = node.getEndPoint();
-                std.log.err("MATCH: {s} => {s}", .{ node.toString(), lines.items[start.row].items[start.column..end.column] });
+        while (true) {
+            if (cursor.nextMatch(&match)) {
+                if (match.capture_count > 0) {
+                    const node = match.captures.node;
+                    const start = node.getStartPoint();
+                    const end = node.getEndPoint();
+                    std.log.err("MATCH: [{d}] {s} => {s}", .{ match.pattern_index, node.toString(), lines.items[start.row].items[start.column..end.column] });
+                } else {
+                    break;
+                }
             } else {
-                return error.ExpectedCursorCapture;
-            }
-        } else {
-            return error.ExpectedCursorMatch;
-        }
-        cursor.removeMatch(0);
-        query.deinit();
-        cursor.deinit();
-        var line: u32 = 0;
-        var col: u32 = 0;
-        while (iter.next()) |node| {
-            std.log.err("{s}", .{node.toString()});
-            if (node.getChildCount() > 0) {
-                // Only render leaf nodes that correspond to actual buffer symbols
-                continue;
-            }
-            const start = node.getStartPoint();
-            if (start.row > window_height) {
-                // Reached the limit on lines
                 break;
             }
-            if (line != start.row) {
-                while (line < start.row) : (line += 1) {
-                    try logToFile("\n", .{});
-                }
-                col = 0;
-            }
-            // NOTE: After converting to render code, this can be
-            //       just an allocated array with a @memset
-            while (col < start.column) : (col += 1) {
-                try logToFile(" ", .{});
-            }
-            const end = node.getEndPoint();
-            if (!node.isNamed() and self.language.getSymbolType(node.getSymbol()) == zts.SymbolType.anonymous) {
-                // Literal character as a node
-                try logToFile("{s}", .{node.getType()});
-            } else {
-                // Segment of buffer content
-                const string = lines.items[line];
-                try logToFile("{s}", .{string.items[start.column..end.column]});
-            }
-            col = end.column;
+            cursor.removeMatch(0);
         }
+        query.deinit();
+        cursor.deinit();
+
+        // self.drawHighlights();
+
+        // var line: u32 = 0;
+        // var col: u32 = 0;
+        // while (iter.next()) |node| {
+        //     std.log.err("{s}", .{node.toString()});
+        //     if (node.getChildCount() > 0) {
+        //         // Only render leaf nodes that correspond to actual buffer symbols
+        //         continue;
+        //     }
+        //     const start = node.getStartPoint();
+        //     if (start.row > window_height) {
+        //         // Reached the limit on lines
+        //         break;
+        //     }
+        //     if (line != start.row) {
+        //         while (line < start.row) : (line += 1) {
+        //             try logToFile("\n", .{});
+        //         }
+        //         col = 0;
+        //     }
+        //     // NOTE: After converting to render code, this can be
+        //     //       just an allocated array with a @memset
+        //     while (col < start.column) : (col += 1) {
+        //         try logToFile(" ", .{});
+        //     }
+        //     const end = node.getEndPoint();
+        //     if (!node.isNamed() and self.language.getSymbolType(node.getSymbol()) == zts.SymbolType.anonymous) {
+        //         // Literal character as a node
+        //         try logToFile("{s}", .{node.getType()});
+        //     } else {
+        //         // Segment of buffer content
+        //         const string = lines.items[line];
+        //         try logToFile("{s}", .{string.items[start.column..end.column]});
+        //     }
+        //     col = end.column;
+        // }
         iter.deinit();
         return error.DebugError;
     }

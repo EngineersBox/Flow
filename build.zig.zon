@@ -14,6 +14,10 @@
             .url = "https://github.com/engineersbox/zig-piecetable/archive/201fe116147e21c077ad450629e25630e8cb9423.tar.gz",
             .hash = "12200e8274f56a2e3e46586ff3b07975f06f2f972922a692fce2c95d06cd95d0ec3e",
         },
+        .zap = .{
+            .url = "https://github.com/EngineersBox/zap/archive/0efc90197b6eebb97c81b2ac6bffb0a608248f17.tar.gz",
+            .hash = "1220bd6c3577ee28780c00277a76fb8e4ba1cd21a1db06e7cd43d3aa6b1ff99f6514",
+        },
     },
     .paths = .{
         "build.zig",

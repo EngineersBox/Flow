@@ -3,6 +3,7 @@ const zts = @import("zts");
 const vaxis = @import("vaxis");
 const colours = @import("colours.zig");
 const logToFile = @import("log.zig").logToFile;
+const Zap = @import("zap");
 
 pub const TreeIterator = struct {
     cursor: zts.TreeCursor,
@@ -187,37 +188,74 @@ pub const TreeSitter = struct {
         } }, .{});
     }
 
-    pub fn drawBuffer(self: *@This(), lines: *std.ArrayList(std.ArrayList(u8)), _: vaxis.Window, window_start_offset: usize, window_width: usize, window_height: usize) !void {
+    pub fn drawBuffer(self: *@This(), lines: *std.ArrayList(std.ArrayList(u8)), _: vaxis.Window, window_start_offset: usize, window_offset_width: usize, window_offset_height: usize, window_height: usize, end_pos: usize) !void {
         const root = self.tree.?.rootNodeWithOffset(@intCast(window_start_offset), .{
-            .row = @intCast(window_width),
-            .column = @intCast(window_height),
+            .row = @intCast(window_offset_width),
+            .column = @intCast(window_offset_height),
         });
         var iter = TreeIterator.init(root);
+        var query = try zts.Query.init(self.language, "(function_declaration name: (identifier) @function)");
+        _ = query.captureCount();
+        _ = query.stringCount();
+        _ = query.startByteForPattern(0);
+        _ = query.endByteForPattern(50);
+        var cursor = try zts.QueryCursor.init();
+        cursor.exec(query, root);
+        _ = cursor.setMatchLimit(3);
+        cursor.setByteRange(0, @intCast(end_pos));
+        cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(window_height), .column = 0 });
+        var match: zts.QueryMatch = undefined;
+        if (cursor.nextMatch(&match)) {
+            if (match.capture_count > 0) {
+                const node = match.captures.node;
+                const start = node.getStartPoint();
+                const end = node.getEndPoint();
+                std.log.err("MATCH: {s} => {s}", .{ node.toString(), lines.items[start.row].items[start.column..end.column] });
+            } else {
+                return error.ExpectedCursorCapture;
+            }
+        } else {
+            return error.ExpectedCursorMatch;
+        }
+        cursor.removeMatch(0);
+        query.deinit();
+        cursor.deinit();
         var line: u32 = 0;
         var col: u32 = 0;
         while (iter.next()) |node| {
+            std.log.err("{s}", .{node.toString()});
+            if (node.getChildCount() > 0) {
+                // Only render leaf nodes that correspond to actual buffer symbols
+                continue;
+            }
             const start = node.getStartPoint();
+            if (start.row > window_height) {
+                // Reached the limit on lines
+                break;
+            }
             if (line != start.row) {
                 while (line < start.row) : (line += 1) {
                     try logToFile("\n", .{});
                 }
                 col = 0;
-            } else {
-                // NOTE: After converting to render code, this can be
-                //       just an allocated array with a @memset
-                while (col < start.column) : (col += 1) {
-                    try logToFile(" ", .{});
-                }
+            }
+            // NOTE: After converting to render code, this can be
+            //       just an allocated array with a @memset
+            while (col < start.column) : (col += 1) {
+                try logToFile(" ", .{});
             }
             const end = node.getEndPoint();
-            if (node.isNamed()) {
+            if (!node.isNamed() and self.language.getSymbolType(node.getSymbol()) == zts.SymbolType.anonymous) {
+                // Literal character as a node
+                try logToFile("{s}", .{node.getType()});
+            } else {
+                // Segment of buffer content
                 const string = lines.items[line];
                 try logToFile("{s}", .{string.items[start.column..end.column]});
-            } else {
-                try logToFile("{s}", .{node.getType()});
             }
-            col += end.column;
+            col = end.column;
         }
+        iter.deinit();
         return error.DebugError;
     }
 };

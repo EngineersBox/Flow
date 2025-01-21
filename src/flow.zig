@@ -193,7 +193,7 @@ pub const Flow = struct {
         if (self.window_lines.items.len != 0) {
             return false;
         }
-        var line_iterator: FileBufferIterator = try self.buffer.windowLineIterator();
+        var line_iterator: FileBufferIterator = try self.buffer.lineIterator();
         while (try line_iterator.next()) |line| {
             try self.window_lines.append(line);
         }
@@ -201,7 +201,11 @@ pub const Flow = struct {
     }
 
     inline fn getCurrentLine(self: *@This()) *std.ArrayList(u8) {
-        return @as(*std.ArrayList(u8), &self.window_lines.items[self.vx.screen.cursor_row]);
+        return @as(*std.ArrayList(u8), &self.window_lines.items[self.buffer.buffer_line_range_indicies.?.start + self.vx.screen.cursor_row]);
+    }
+
+    inline fn getWindowRelativeLine(self: *@This(), line: usize) *std.ArrayList(u8) {
+        return @as(*std.ArrayList(u8), &self.window_lines.items[self.buffer.buffer_line_range_indicies.?.start + line]);
     }
 
     inline fn confineCursorToCurrentLine(self: *@This(), clamp: ClampMode) void {
@@ -274,8 +278,8 @@ pub const Flow = struct {
     fn adjustCursorOffset(self: *@This(), prev_row: usize, prev_col: usize) void {
         const new_row = self.vx.screen.cursor_row;
         const new_col = self.vx.screen.cursor_col;
-        const new_row_len = self.window_lines.items[new_row].items.len;
-        const prev_row_len = self.window_lines.items[prev_row].items.len;
+        const new_row_len = self.getWindowRelativeLine(new_row).items.len;
+        const prev_row_len = self.getWindowRelativeLine(prev_row).items.len;
         if (new_row > prev_row) {
             self.cursor_offset += (prev_row_len - prev_col) + new_col;
             return;
@@ -493,18 +497,10 @@ pub const Flow = struct {
         //      makes it a constant value and not variable (which is
         //      needed here).
         if (self.tree_sitter != null) {
-            var lines = std.ArrayList(std.ArrayList(u8)).init(self.allocator);
-            var iter = try self.buffer.lineIterator();
-            while (try iter.next()) |line| {
-                try lines.append(line);
-            }
-            try self.tree_sitter.?.drawBuffer(&lines, window, 0, 0, 0);
-            for (lines.items) |line| {
-                line.deinit();
-            }
-            lines.deinit();
+            try self.tree_sitter.?.drawBuffer(&self.window_lines, window, self.buffer.buffer_offset_range_indicies.?.start, 0, 0, self.vx.screen.height, self.buffer.buffer_offset_range_indicies.?.end);
         } else {
-            for (self.window_lines.items, 0..) |line, y_offset| {
+            const lines = self.window_lines.items[self.buffer.buffer_line_range_indicies.?.start..self.buffer.buffer_line_range_indicies.?.end];
+            for (lines, 0..) |line, y_offset| {
                 try drawLine(line.items, y_offset, window);
             }
         }

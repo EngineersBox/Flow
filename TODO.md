@@ -17,11 +17,11 @@
 * [X] Cursor in insert mode should be a line instead of a block
 * [X] Cursor in insert mode should be able to hover over newline (whether it exists or not) to remove last character (before newline if exists)
 * [X] All operations (`insert`, `append`, `set` & `delete`) on `FileBuffer` need to update `buffer_line_range_indices` and `buffer_offset_range_indices`
+* [X] Treesitter parsing for lines in buffer, using output to style line segments
 * [ ] Range based delete via visual mode
 * [ ] Config loading
 * [ ] Configurable colour scheme
 * [ ] Configurable key maps
-* [X] Treesitter parsing for lines in buffer, using output to style line segments
 * [ ] Query tree sitter using language highlights SCM
 * [ ] Thread pool based rendering of each language highlight with main thread rendering un-highlighted text.
 

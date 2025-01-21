@@ -3,6 +3,7 @@ const zts = @import("zts");
 const vaxis = @import("vaxis");
 const colours = @import("colours.zig");
 const logToFile = @import("log.zig").logToFile;
+const Queries = @import("query.zig");
 const Pool = @import("zap");
 const config = @import("config.zig");
 const known_folders = @import("known-folders");
@@ -126,25 +127,6 @@ fn loadGrammar(grammar: zts.LanguageGrammar) !*const zts.Language {
     unreachable;
 }
 
-// pub const Queries = struct {
-//     elems: std.HashMap([]const u8, []const u8),
-//
-//     pub fn init(allocator: std.mem.Allocator, grammar: zts.LanguageGrammar) @This() {
-//         var path = try known_folders.getPath(allocator, .roaming_configuration) orelse return error.QueriesNotFound;
-//         const prev_path_pen = path.len;
-//         const highlight_file = config.TREE_SITTER_QUERIES_PATH ++ @tagName(grammar) ++ "/highlights.scm";
-//         if (!allocator.resize(path, path.len + highlight_file.len)) {
-//             return error.OutOfMemory;
-//         }
-//         defer allocator.free(path);
-//         @memcpy(path[prev_path_pen], highlight_file);
-//         return .{
-//
-//         };
-//     }
-//
-// };
-
 pub const TreeSitter = struct {
     allocator: std.mem.Allocator,
     language: *const zts.Language,
@@ -234,11 +216,13 @@ pub const TreeSitter = struct {
             .row = @intCast(window_offset_width),
             .column = @intCast(window_offset_height),
         });
-        var iter = TreeIterator.init(root);
+        // var iter = TreeIterator.init(root);
         const hl_file = try std.fs.openFileAbsolute("/Users/jackkilrain/.config/flow/queries/zig/highlights.scm", .{ .mode = .read_only });
         defer hl_file.close();
         const hl_queries = try hl_file.readToEndAlloc(self.allocator, 1024 * 1024 * 1024);
         defer self.allocator.free(hl_queries);
+        var queries = Queries.init(self.allocator, hl_queries);
+        try queries.parseQueries();
         var query = try zts.Query.init(self.language, hl_queries);
         // var query = try zts.Query.init(self.language, "(function_declaration name: (identifier) @function)");
         _ = query.captureCount();
@@ -248,22 +232,19 @@ pub const TreeSitter = struct {
         _ = query.endByteForPattern(50);
         var cursor = try zts.QueryCursor.init();
         cursor.exec(query, root);
-        _ = cursor.setMatchLimit(3);
         cursor.setByteRange(0, @intCast(end_pos));
         cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(window_height), .column = 0 });
         var match: zts.QueryMatch = undefined;
         while (true) {
-            if (cursor.nextMatch(&match)) {
-                if (match.capture_count > 0) {
-                    const node = match.captures.node;
-                    const start = node.getStartPoint();
-                    const end = node.getEndPoint();
-                    std.log.err("MATCH: [{d}] {s} => {s}", .{ match.pattern_index, node.toString(), lines.items[start.row].items[start.column..end.column] });
-                } else {
-                    break;
-                }
-            } else {
+            if (!cursor.nextMatch(&match)) {
                 break;
+            }
+            const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
+            for (0..match.capture_count) |i| {
+                const node = captures[i].node;
+                const start = node.getStartPoint();
+                const end = node.getEndPoint();
+                std.log.err("MATCH {d}: [{d}] {s} => {s} :: {s}", .{ i, match.pattern_index, node.toString(), lines.items[start.row].items[start.column..end.column], node.getSymbol() });
             }
             cursor.removeMatch(0);
         }
@@ -274,9 +255,14 @@ pub const TreeSitter = struct {
 
         // var line: u32 = 0;
         // var col: u32 = 0;
+        // std.log.err("Field count: {d}", .{self.language.getFieldCount()});
+        // for (1..self.language.getFieldCount()) |i| {
+        //     std.log.err("Field {d}: {s}", .{ i, self.language.getFieldNameForId(@intCast(i)) });
+        // }
         // while (iter.next()) |node| {
         //     std.log.err("{s}", .{node.toString()});
         //     if (node.getChildCount() > 0) {
+        //         std.log.err("{s}", .{node.toString()});
         //         // Only render leaf nodes that correspond to actual buffer symbols
         //         continue;
         //     }
@@ -307,7 +293,7 @@ pub const TreeSitter = struct {
         //     }
         //     col = end.column;
         // }
-        iter.deinit();
+        // iter.deinit();
         return error.DebugError;
     }
 };

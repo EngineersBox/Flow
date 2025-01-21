@@ -21,7 +21,9 @@
 * [ ] Config loading
 * [ ] Configurable colour scheme
 * [ ] Configurable key maps
-* [ ] Treesitter parsing for lines in buffer, using output to style line segments
+* [X] Treesitter parsing for lines in buffer, using output to style line segments
+* [ ] Query tree sitter using language highlights SCM
+* [ ] Thread pool based rendering of each language highlight with main thread rendering un-highlighted text.
 
 ## Refactor
 

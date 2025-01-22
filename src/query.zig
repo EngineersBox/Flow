@@ -36,8 +36,6 @@ pub fn parseQueries(self: *@This()) !void {
     var bracket_level: usize = 0;
     // ( or )
     var parenthesis_level: usize = 0;
-    // < or >
-    var angled_level: usize = 0;
     var match_stack = std.ArrayList(u8).init(self.allocator);
     defer match_stack.clearAndFree();
     var tag_stack = Tags.init(self.allocator);
@@ -125,7 +123,7 @@ pub fn parseQueries(self: *@This()) !void {
                 try tag.append('@');
                 try tag_stack.append(tag);
                 parsing_tag = true;
-                std.log.err("Creating new tag",. {});
+                std.log.err("Creating new tag", .{});
             },
             0x41...0x5A, 0x61...0x7A, 0x30...0x39, 0x2E => {
                 if (parsing_tag) {
@@ -137,7 +135,7 @@ pub fn parseQueries(self: *@This()) !void {
                 parsing_tag = false;
             },
         }
-        if (bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0 and angled_level == 0) {
+        if (bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0) {
             const result = try self.elems.getOrPut(&query);
             if (!result.found_existing) {
                 result.value_ptr.* = Tags.init(self.allocator);

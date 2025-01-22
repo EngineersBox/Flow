@@ -135,7 +135,8 @@ pub fn parseQueries(self: *@This()) !void {
                 parsing_tag = false;
             },
         }
-        if (bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0) {
+        if (bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0 and tag_stack.items.len > 0) {
+            std.log("Adding tag to query: {s}", .{query});
             const result = try self.elems.getOrPut(&query);
             if (!result.found_existing) {
                 result.value_ptr.* = Tags.init(self.allocator);
@@ -144,7 +145,7 @@ pub fn parseQueries(self: *@This()) !void {
                 try result.value_ptr.append(tag);
             }
             query = Query.init(self.allocator);
-        } else {
+        } else if (char != '\n') {
             try query.append(char);
         }
         continue;

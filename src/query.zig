@@ -3,7 +3,7 @@ const std = @import("std");
 const Query = std.ArrayList(u8);
 const Tag = std.ArrayList(u8);
 const Tags = std.ArrayList(Tag);
-pub const QueryContext = struct {
+const QueryContext = struct {
     pub fn hash(self: @This(), s: Query) u64 {
         _ = self;
         return std.array_hash_map.hashString(s.items);

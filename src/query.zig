@@ -3,7 +3,17 @@ const std = @import("std");
 const Query = std.ArrayList(u8);
 const Tag = std.ArrayList(u8);
 const Tags = std.ArrayList(Tag);
-const Elems = std.AutoHashMap(*Query, Tags);
+pub const QueryContext = struct {
+    pub fn hash(self: @This(), s: Query) u64 {
+        _ = self;
+        return std.array_hash_map.hashString(s.items);
+    }
+    pub fn eql(self: @This(), a: Query, b: Query) bool {
+        _ = self;
+        return std.array_hash_map.eqlString(a.items, b.items);
+    }
+};
+const Elems = std.HashMap(Query, Tags, QueryContext, 80);
 
 allocator: std.mem.Allocator,
 buffer: []const u8,
@@ -39,27 +49,37 @@ pub fn parseQueries(self: *@This()) !void {
     var match_stack = std.ArrayList(u8).init(self.allocator);
     defer match_stack.clearAndFree();
     var tag_stack = Tags.init(self.allocator);
-    defer {
-        while (tag_stack.popOrNull()) |tag| {
-            tag.deinit();
-        }
-        tag_stack.deinit();
-    }
+    // defer {
+    //     while (tag_stack.popOrNull()) |tag| {
+    //         tag.deinit();
+    //     }
+    //     tag_stack.deinit();
+    // }
     var parsing_tag: bool = false;
     var query = Query.init(self.allocator);
     var comment: bool = false;
+    var string: bool = false;
     for (self.buffer, 0..) |char, i| {
-        std.log.err("CURRENT CHAR: '{s}'", .{[1]u8{char}});
         if (comment) {
             if (char == '\n') {
                 comment = false;
             }
             continue;
         }
+        if (string) {
+            if (char == '"') {
+                string = false;
+            }
+            try query.append(char);
+            continue;
+        }
         switch (char) {
             ';' => {
                 comment = true;
                 continue;
+            },
+            '"' => {
+                string = true;
             },
             '{' => {
                 try match_stack.append(char);
@@ -68,16 +88,16 @@ pub fn parseQueries(self: *@This()) !void {
             },
             '}' => {
                 const matching = match_stack.popOrNull() orelse {
-                    std.log.err("Unmatched '}}' @ {d}, has not opening partner on the stack", .{i});
+                    std.log.err("Unmatched '}}' @ {d}, has no opening partner on the stack", .{i});
                     return error.TrailingUnmatchedBrace;
                 };
                 if (matching != '{') {
                     std.log.err("Missing matching '{{' for '}}' at @ {d}, had {s}", .{ i, [1]u8{matching} });
                     return error.NoMatchingBrace;
                 }
-                try match_stack.append(char);
                 brace_level -= 1;
                 parsing_tag = false;
+                try query.append(char);
             },
             '[' => {
                 try match_stack.append(char);
@@ -86,16 +106,16 @@ pub fn parseQueries(self: *@This()) !void {
             },
             ']' => {
                 const matching = match_stack.popOrNull() orelse {
-                    std.log.err("Unmatched ']' @ {d}, has not opening partner on the stack", .{i});
+                    std.log.err("Unmatched ']' @ {d}, has no opening partner on the stack", .{i});
                     return error.TrailingUnmatchedBracket;
                 };
                 if (matching != '[') {
                     std.log.err("Missing matching '[' for ']' at @ {d}, had {s}", .{ i, [1]u8{matching} });
                     return error.NoMatchingBracket;
                 }
-                try match_stack.append(char);
                 bracket_level -= 1;
                 parsing_tag = false;
+                try query.append(char);
             },
             '(' => {
                 try match_stack.append(char);
@@ -104,16 +124,16 @@ pub fn parseQueries(self: *@This()) !void {
             },
             ')' => {
                 const matching = match_stack.popOrNull() orelse {
-                    std.log.err("Unmatched ')' @ {d}, has not opening partner on the stack", .{i});
+                    std.log.err("Unmatched ')' @ {d}, has no opening partner on the stack", .{i});
                     return error.TrailingUnmatchedParenthesis;
                 };
                 if (matching != '(') {
                     std.log.err("Missing matching '(' for ')' at @ {d}, had {s}", .{ i, [1]u8{matching} });
                     return error.NoMatchingParenthesis;
                 }
-                try match_stack.append(char);
                 parenthesis_level -= 1;
                 parsing_tag = false;
+                try query.append(char);
             },
             '@' => {
                 if (parsing_tag) {
@@ -123,7 +143,6 @@ pub fn parseQueries(self: *@This()) !void {
                 try tag.append('@');
                 try tag_stack.append(tag);
                 parsing_tag = true;
-                std.log.err("Creating new tag", .{});
             },
             0x41...0x5A, 0x61...0x7A, 0x30...0x39, 0x2E => {
                 if (parsing_tag) {
@@ -135,9 +154,8 @@ pub fn parseQueries(self: *@This()) !void {
                 parsing_tag = false;
             },
         }
-        if (bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0 and tag_stack.items.len > 0) {
-            std.log("Adding tag to query: {s}", .{query});
-            const result = try self.elems.getOrPut(&query);
+        if (bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0 and !parsing_tag and tag_stack.items.len > 0) {
+            const result = try self.elems.getOrPut(query);
             if (!result.found_existing) {
                 result.value_ptr.* = Tags.init(self.allocator);
             }
@@ -152,7 +170,7 @@ pub fn parseQueries(self: *@This()) !void {
     }
     var iter = self.elems.iterator();
     while (iter.next()) |entry| {
-        std.log.err("Key: {s}", .{entry.key_ptr.*.items});
+        std.log.err("Key: {s}", .{entry.key_ptr.items});
         for (entry.value_ptr.items, 0..) |value, i| {
             std.log.err(" - Value {d}: {s}", .{ i, value.items });
         }

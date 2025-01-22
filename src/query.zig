@@ -49,8 +49,20 @@ pub fn parseQueries(self: *@This()) !void {
     }
     var parsing_tag: bool = false;
     var query = Query.init(self.allocator);
+    var comment: bool = false;
     for (self.buffer, 0..) |char, i| {
+        std.log.err("CURRENT CHAR: '{s}'", .{[1]u8{char}});
+        if (comment) {
+            if (char == '\n') {
+                comment = false;
+            }
+            continue;
+        }
         switch (char) {
+            ';' => {
+                comment = true;
+                continue;
+            },
             '{' => {
                 try match_stack.append(char);
                 brace_level += 1;
@@ -58,11 +70,11 @@ pub fn parseQueries(self: *@This()) !void {
             },
             '}' => {
                 const matching = match_stack.popOrNull() orelse {
-                    std.log.err("Unmatched '}' @ {d}, has not opening partner on the stack", .{i});
+                    std.log.err("Unmatched '}}' @ {d}, has not opening partner on the stack", .{i});
                     return error.TrailingUnmatchedBrace;
                 };
                 if (matching != '{') {
-                    std.log.err("Missing matching '{' for '}' at @ {d}, had {s}", .{ i, [1]u8{matching} });
+                    std.log.err("Missing matching '{{' for '}}' at @ {d}, had {s}", .{ i, [1]u8{matching} });
                     return error.NoMatchingBrace;
                 }
                 try match_stack.append(char);
@@ -79,8 +91,8 @@ pub fn parseQueries(self: *@This()) !void {
                     std.log.err("Unmatched ']' @ {d}, has not opening partner on the stack", .{i});
                     return error.TrailingUnmatchedBracket;
                 };
-                if (matching != '{') {
-                    std.log.err("Missing matching '[' for ']' at @ {d}, had {}", .{ i, matching });
+                if (matching != '[') {
+                    std.log.err("Missing matching '[' for ']' at @ {d}, had {s}", .{ i, [1]u8{matching} });
                     return error.NoMatchingBracket;
                 }
                 try match_stack.append(char);
@@ -97,33 +109,12 @@ pub fn parseQueries(self: *@This()) !void {
                     std.log.err("Unmatched ')' @ {d}, has not opening partner on the stack", .{i});
                     return error.TrailingUnmatchedParenthesis;
                 };
-                if (matching != '{') {
-                    std.log.err("Missing matching '(' for ')' at @ {d}, had {}", .{ i, matching });
+                if (matching != '(') {
+                    std.log.err("Missing matching '(' for ')' at @ {d}, had {s}", .{ i, [1]u8{matching} });
                     return error.NoMatchingParenthesis;
                 }
                 try match_stack.append(char);
                 parenthesis_level -= 1;
-                parsing_tag = false;
-            },
-            '<' => {
-                try match_stack.append(char);
-                angled_level += 1;
-                parsing_tag = false;
-            },
-            '>' => {
-                if (parsing_tag) {
-                    parsing_tag = false;
-                }
-                const matching = match_stack.popOrNull() orelse {
-                    std.log.err("Unmatched '>' @ {d}, has not opening partner on the stack", .{i});
-                    return error.TrailingUnmatchedAngled;
-                };
-                if (matching != '{') {
-                    std.log.err("Missing matching '<' for '>' at @ {d}, had {}", .{ i, matching });
-                    return error.NoMatchingAngled;
-                }
-                try match_stack.append(char);
-                angled_level -= 1;
                 parsing_tag = false;
             },
             '@' => {
@@ -134,10 +125,11 @@ pub fn parseQueries(self: *@This()) !void {
                 try tag.append('@');
                 try tag_stack.append(tag);
                 parsing_tag = true;
+                std.log.err("Creating new tag",. {});
             },
             0x41...0x5A, 0x61...0x7A, 0x30...0x39, 0x2E => {
                 if (parsing_tag) {
-                    var tag: std.ArrayList(u8) = tag_stack.items[tag_stack.items.len - 1];
+                    var tag: Tag = tag_stack.getLast();
                     try tag.append(char);
                 }
             },

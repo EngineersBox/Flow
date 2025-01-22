@@ -244,7 +244,7 @@ pub const TreeSitter = struct {
                 const node = captures[i].node;
                 const start = node.getStartPoint();
                 const end = node.getEndPoint();
-                std.log.err("MATCH {d}: [{d}] {s} => {s} :: {s}", .{ i, match.pattern_index, node.toString(), lines.items[start.row].items[start.column..end.column], node.getSymbol() });
+                std.log.err("MATCH {d}: [{d}] {s} => {s} :: {s}", .{ i, match.pattern_index, node.toString(), lines.items[start.row].items[start.column..end.column], self.language.getSymbolName(node.getSymbol()) });
             }
             cursor.removeMatch(0);
         }

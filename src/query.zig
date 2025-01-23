@@ -4,16 +4,17 @@ const Query = std.ArrayList(u8);
 const Tag = std.ArrayList(u8);
 const Tags = std.ArrayList(Tag);
 const QueryContext = struct {
-    pub fn hash(self: @This(), s: Query) u64 {
+    pub fn hash(self: @This(), s: Query) u32 {
         _ = self;
         return std.array_hash_map.hashString(s.items);
     }
-    pub fn eql(self: @This(), a: Query, b: Query) bool {
+    pub fn eql(self: @This(), a: Query, b: Query, b_index: usize) bool {
         _ = self;
+        _ = b_index;
         return std.array_hash_map.eqlString(a.items, b.items);
     }
 };
-const Elems = std.HashMap(Query, Tags, QueryContext, std.hash_map.default_max_load_percentage);
+const Elems = std.ArrayHashMap(Query, Tags, QueryContext, true);
 
 allocator: std.mem.Allocator,
 buffer: []const u8,

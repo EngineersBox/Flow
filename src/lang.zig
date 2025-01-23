@@ -129,6 +129,28 @@ fn loadGrammar(grammar: zts.LanguageGrammar) !*const zts.Language {
     unreachable;
 }
 
+const ThreadHighlights = struct {
+    index: usize,
+    count: usize,
+};
+
+fn partitionHighlights(highlights: []ThreadHighlights, query_count: usize, threads: usize) void {
+    const chunk_size = query_count / threads;
+    const excess = query_count - (chunk_size * threads);
+    for (0..threads) |i| {
+        highlights[i].index = 0;
+        highlights[i].count = chunk_size;
+    }
+    for (0..excess) |i| {
+        highlights[i].count += 1;
+    }
+    var total: usize = 0;
+    for (0..threads) |i| {
+        highlights[i].index = total;
+        total += highlights[i].count;
+    }
+}
+
 pub const TreeSitter = struct {
     allocator: std.mem.Allocator,
     language: *const zts.Language,
@@ -136,6 +158,7 @@ pub const TreeSitter = struct {
     tree: ?*zts.Tree,
     queries: Queries,
     line: usize,
+    per_thread_highlights: []ThreadHighlights,
     render_thread_pool: Pool,
 
     pub fn initFromFileExtension(allocator: std.mem.Allocator, extension: []const u8) !?TreeSitter {
@@ -154,6 +177,10 @@ pub const TreeSitter = struct {
         defer allocator.free(hl_queries);
         var queries = Queries.init(allocator, hl_queries);
         try queries.parseQueries();
+        const query_count: usize = @intCast(queries.elems.count());
+        const thread_count: usize = @min(query_count, std.Thread.getCpuCount() catch 1);
+        const per_thread_highlights = try allocator.alloc(ThreadHighlights, thread_count);
+        partitionHighlights(per_thread_highlights, query_count, thread_count);
         return .{
             .allocator = allocator,
             .language = language,
@@ -161,6 +188,7 @@ pub const TreeSitter = struct {
             .tree = null,
             .queries = queries,
             .line = 0,
+            .per_thread_highlights = per_thread_highlights,
             .render_thread_pool = Pool.init(@max(1, std.Thread.getCpuCount() catch 1)),
         };
     }
@@ -225,6 +253,7 @@ pub const TreeSitter = struct {
             .column = @intCast(window_offset_height),
         });
         // var iter = TreeIterator.init(root);
+
         var queries_iter = self.queries.elems.iterator();
         while (queries_iter.next()) |entry| {
             var query = try zts.Query.init(self.language, entry.key_ptr.*.items);

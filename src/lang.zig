@@ -252,7 +252,7 @@ pub const TreeSitter = struct {
                         .x_off = start.column - window_lines_offset.start,
                         .y_off = start.row,
                         .width = .{ .limit = end.column - start.column },
-                        .height = .{ .limit = end.row - start.row },
+                        .height = .{ .limit = @max(1, end.row - start.row) },
                     });
                     // FIXME: This doesn't render for some reason
                     _ = try segment.printSegment(.{

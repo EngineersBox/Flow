@@ -284,6 +284,8 @@ pub const TreeSitter = struct {
                     _ = query.captureCount();
                     _ = query.stringCount();
                     _ = query.patternCount();
+                    _ = query.startByteForPattern(0);
+                    _ = query.endByteForPattern(50);
                     var cursor = zts.QueryCursor.init() catch {
                         std.log.err("Failed to init query cursor", .{});
                         return;
@@ -317,7 +319,7 @@ pub const TreeSitter = struct {
                                     .reverse = false,
                                 },
                             }, .{}) catch {
-                                std.log.err("FAiled to render", .{});
+                                std.log.err("Failed to render", .{});
                                 return;
                             };
                         }
@@ -332,6 +334,7 @@ pub const TreeSitter = struct {
         defer wg.wait();
 
         for (tasks, 0..) |*task, i| {
+            wg.start();
             task.* = .{ .wg = &wg, .parent = self, .lines = lines, .window = window, .window_offset = window_offset, .window_lines_offset = window_lines_offset, .window_offset_width = window_offset_width, .window_offset_height = window_offset_height, .window_height = window_height, .highlights = &self.per_thread_highlights[i], .root = root };
             Pool.schedule(&self.render_thread_pool, &task.task);
         }

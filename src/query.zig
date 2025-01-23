@@ -13,7 +13,7 @@ const QueryContext = struct {
         return std.array_hash_map.eqlString(a.items, b.items);
     }
 };
-const Elems = std.HashMap(Query, Tags, QueryContext, 80);
+const Elems = std.HashMap(Query, Tags, QueryContext, std.hash_map.default_max_load_percentage);
 
 allocator: std.mem.Allocator,
 buffer: []const u8,
@@ -36,7 +36,7 @@ pub fn deinit(self: *@This()) void {
         }
         entry.value_ptr.deinit();
     }
-    self.allocator.free(self.elems);
+    self.elems.deinit();
 }
 
 pub fn parseQueries(self: *@This()) !void {
@@ -49,28 +49,37 @@ pub fn parseQueries(self: *@This()) !void {
     var match_stack = std.ArrayList(u8).init(self.allocator);
     defer match_stack.clearAndFree();
     var tag_stack = Tags.init(self.allocator);
-    // defer {
-    //     while (tag_stack.popOrNull()) |tag| {
-    //         tag.deinit();
-    //     }
-    //     tag_stack.deinit();
-    // }
+    defer {
+        while (tag_stack.popOrNull()) |tag| {
+            tag.deinit();
+        }
+        tag_stack.deinit();
+    }
     var parsing_tag: bool = false;
-    var query = Query.init(self.allocator);
+    var query: ?Query = null;
+    errdefer {
+        if (query) |q| {
+            q.deinit();
+        }
+    }
     var comment: bool = false;
     var string: bool = false;
     for (self.buffer, 0..) |char, i| {
+        if (query == null) {
+            // Prevents creating a new query at the end without it
+            // being stored in the map
+            query = Query.init(self.allocator);
+        }
         if (comment) {
             if (char == '\n') {
                 comment = false;
             }
             continue;
-        }
-        if (string) {
+        } else if (string) {
             if (char == '"') {
                 string = false;
             }
-            try query.append(char);
+            try query.?.append(char);
             continue;
         }
         switch (char) {
@@ -97,7 +106,7 @@ pub fn parseQueries(self: *@This()) !void {
                 }
                 brace_level -= 1;
                 parsing_tag = false;
-                try query.append(char);
+                // try query.?.append(char);
             },
             '[' => {
                 try match_stack.append(char);
@@ -115,7 +124,7 @@ pub fn parseQueries(self: *@This()) !void {
                 }
                 bracket_level -= 1;
                 parsing_tag = false;
-                try query.append(char);
+                // try query.?.append(char);
             },
             '(' => {
                 try match_stack.append(char);
@@ -133,46 +142,49 @@ pub fn parseQueries(self: *@This()) !void {
                 }
                 parenthesis_level -= 1;
                 parsing_tag = false;
-                try query.append(char);
+                // try query.?.append(char);
             },
             '@' => {
                 if (parsing_tag) {
                     return error.InvalidTagPlacement;
                 }
-                var tag = Tag.init(self.allocator);
-                try tag.append('@');
-                try tag_stack.append(tag);
+                // Don't add the leading '@' to a tag since we need
+                // to remove it later anyway
+                try tag_stack.append(Tag.init(self.allocator));
                 parsing_tag = true;
             },
             0x41...0x5A, 0x61...0x7A, 0x30...0x39, 0x2E => {
                 if (parsing_tag) {
-                    var tag: Tag = tag_stack.getLast();
-                    try tag.append(char);
+                    try tag_stack.items[tag_stack.items.len - 1].append(char);
                 }
             },
             else => {
                 parsing_tag = false;
             },
         }
-        if (bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0 and !parsing_tag and tag_stack.items.len > 0) {
-            const result = try self.elems.getOrPut(query);
+        if (char != '\n') {
+            try query.?.append(char);
+        }
+        if (char == '\n' and bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0 and !parsing_tag and tag_stack.items.len > 0) {
+            const result = try self.elems.getOrPut(query.?);
             if (!result.found_existing) {
                 result.value_ptr.* = Tags.init(self.allocator);
             }
             while (tag_stack.popOrNull()) |tag| {
                 try result.value_ptr.append(tag);
             }
-            query = Query.init(self.allocator);
-        } else if (char != '\n') {
-            try query.append(char);
+            query = null;
         }
         continue;
     }
-    var iter = self.elems.iterator();
-    while (iter.next()) |entry| {
-        std.log.err("Key: {s}", .{entry.key_ptr.items});
-        for (entry.value_ptr.items, 0..) |value, i| {
-            std.log.err(" - Value {d}: {s}", .{ i, value.items });
-        }
+    if (match_stack.items.len != 0) {
+        return error.NonEmptyMatchStack;
     }
+    // var iter = self.elems.iterator();
+    // while (iter.next()) |entry| {
+    //     std.log.err("Key: {s} Value count: {d}", .{ entry.key_ptr.items, entry.value_ptr.items.len });
+    //     for (entry.value_ptr.items, 0..) |value, i| {
+    //         std.log.err(" - Value {d}: {s}", .{ i, value.items });
+    //     }
+    // }
 }

@@ -103,6 +103,9 @@ pub const Flow = struct {
         }
         self.window_lines.deinit();
         self.allocator.free(self.tab_spaces_buffer);
+        if (self.tree_sitter != null) {
+            self.tree_sitter.?.deinit();
+        }
     }
 
     pub fn run(self: *@This()) !void {
@@ -497,7 +500,7 @@ pub const Flow = struct {
         //      makes it a constant value and not variable (which is
         //      needed here).
         if (self.tree_sitter != null) {
-            try self.tree_sitter.?.drawBuffer(&self.window_lines, window, self.buffer.buffer_offset_range_indicies.?.start, 0, 0, self.vx.screen.height, self.buffer.buffer_offset_range_indicies.?.end);
+            try self.tree_sitter.?.drawBuffer(&self.window_lines, window, self.buffer.buffer_offset_range_indicies.?, self.buffer.buffer_line_range_indicies.?, 0, 0, self.vx.screen.height - 1);
         } else {
             const lines = self.window_lines.items[self.buffer.buffer_line_range_indicies.?.start..self.buffer.buffer_line_range_indicies.?.end];
             for (lines, 0..) |line, y_offset| {

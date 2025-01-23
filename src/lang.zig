@@ -8,6 +8,8 @@ const Pool = @import("zap");
 const config = @import("config.zig");
 const known_folders = @import("known-folders");
 const json = @import("json");
+const fb = @import("buffer.zig");
+const Range = fb.Range;
 
 pub const TreeIterator = struct {
     cursor: zts.TreeCursor,
@@ -132,7 +134,7 @@ pub const TreeSitter = struct {
     language: *const zts.Language,
     parser: *zts.Parser,
     tree: ?*zts.Tree,
-    // queries: Queries,
+    queries: Queries,
     line: usize,
     render_thread_pool: Pool,
 
@@ -146,13 +148,18 @@ pub const TreeSitter = struct {
     pub fn init(allocator: std.mem.Allocator, language: *const zts.Language) !TreeSitter {
         const parser = try zts.Parser.init();
         try parser.setLanguage(language);
-        // const queries = Queries.init();
+        const hl_file = try std.fs.openFileAbsolute("/Users/jackkilrain/.config/flow/queries/zig/highlights.scm", .{ .mode = .read_only });
+        defer hl_file.close();
+        const hl_queries = try hl_file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
+        defer allocator.free(hl_queries);
+        var queries = Queries.init(allocator, hl_queries);
+        try queries.parseQueries();
         return .{
             .allocator = allocator,
             .language = language,
             .parser = parser,
             .tree = null,
-            // .queries = queries,
+            .queries = queries,
             .line = 0,
             .render_thread_pool = Pool.init(@max(1, std.Thread.getCpuCount() catch 1)),
         };
@@ -160,6 +167,7 @@ pub const TreeSitter = struct {
 
     pub fn deinit(self: *@This()) void {
         self.parser.deinit();
+        self.queries.deinit();
     }
 
     pub fn parseBuffer(self: *@This(), buffer: []const u8) !void {
@@ -211,47 +219,55 @@ pub const TreeSitter = struct {
     //     };
     // }
 
-    pub fn drawBuffer(self: *@This(), lines: *std.ArrayList(std.ArrayList(u8)), _: vaxis.Window, window_start_offset: usize, window_offset_width: usize, window_offset_height: usize, window_height: usize, end_pos: usize) !void {
-        const root = self.tree.?.rootNodeWithOffset(@intCast(window_start_offset), .{
+    pub fn drawBuffer(self: *@This(), lines: *std.ArrayList(std.ArrayList(u8)), window: vaxis.Window, window_offset: Range, window_lines_offset: Range, window_offset_width: usize, window_offset_height: usize, window_height: usize) !void {
+        const root = self.tree.?.rootNodeWithOffset(@intCast(window_offset.start), .{
             .row = @intCast(window_offset_width),
             .column = @intCast(window_offset_height),
         });
         // var iter = TreeIterator.init(root);
-        const hl_file = try std.fs.openFileAbsolute("/Users/jackkilrain/.config/flow/queries/zig/highlights.scm", .{ .mode = .read_only });
-        defer hl_file.close();
-        const hl_queries = try hl_file.readToEndAlloc(self.allocator, 1024 * 1024 * 1024);
-        defer self.allocator.free(hl_queries);
-        var queries = Queries.init(self.allocator, hl_queries);
-        try queries.parseQueries();
-        var query = try zts.Query.init(self.language, hl_queries);
-        // var query = try zts.Query.init(self.language, "(function_declaration name: (identifier) @function)");
-        _ = query.captureCount();
-        _ = query.stringCount();
-        _ = query.patternCount();
-        _ = query.startByteForPattern(0);
-        _ = query.endByteForPattern(50);
-        var cursor = try zts.QueryCursor.init();
-        cursor.exec(query, root);
-        cursor.setByteRange(0, @intCast(end_pos));
-        cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(window_height), .column = 0 });
-        var match: zts.QueryMatch = undefined;
-        while (true) {
-            if (!cursor.nextMatch(&match)) {
-                break;
+        var queries_iter = self.queries.elems.iterator();
+        while (queries_iter.next()) |entry| {
+            var query = try zts.Query.init(self.language, entry.key_ptr.*.items);
+            _ = query.captureCount();
+            _ = query.stringCount();
+            _ = query.patternCount();
+            _ = query.startByteForPattern(0);
+            _ = query.endByteForPattern(50);
+            var cursor = try zts.QueryCursor.init();
+            cursor.exec(query, root);
+            cursor.setByteRange(@intCast(window_offset.start), @intCast(window_offset.end));
+            cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(window_height), .column = 0 });
+            var match: zts.QueryMatch = undefined;
+            while (true) {
+                if (!cursor.nextMatch(&match)) {
+                    break;
+                }
+                const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
+                for (0..match.capture_count) |i| {
+                    const node = captures[i].node;
+                    const start = node.getStartPoint();
+                    const end = node.getEndPoint();
+                    std.log.err("MATCH {d}: {s} :: ({d},{d})", .{ i, lines.items[start.row].items[start.column..end.column], start.column, start.row });
+                    const segment = window.child(.{
+                        .x_off = start.column - window_lines_offset.start,
+                        .y_off = start.row,
+                        .width = .{ .limit = end.column - start.column },
+                        .height = .{ .limit = end.row - start.row },
+                    });
+                    _ = try segment.printSegment(.{
+                        .text = lines.items[start.row].items[start.column..end.column],
+                        .style = .{
+                            .bg = colours.BLACK,
+                            .fg = colours.WHITE,
+                            .reverse = false,
+                        },
+                    }, .{});
+                }
+                cursor.removeMatch(0);
             }
-            const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
-            for (0..match.capture_count) |i| {
-                const node = captures[i].node;
-                const start = node.getStartPoint();
-                const end = node.getEndPoint();
-                std.log.err("MATCH {d}: [{d}] {s} => {s} :: {s}", .{ i, match.pattern_index, node.toString(), lines.items[start.row].items[start.column..end.column], self.language.getSymbolName(node.getSymbol()) });
-            }
-            cursor.removeMatch(0);
+            query.deinit();
+            cursor.deinit();
         }
-        query.deinit();
-        cursor.deinit();
-
-        // self.drawHighlights();
 
         // var line: u32 = 0;
         // var col: u32 = 0;
@@ -294,6 +310,6 @@ pub const TreeSitter = struct {
         //     col = end.column;
         // }
         // iter.deinit();
-        return error.DebugError;
+        // return error.DebugError;
     }
 };

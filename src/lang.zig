@@ -254,6 +254,7 @@ pub const TreeSitter = struct {
                         .width = .{ .limit = end.column - start.column },
                         .height = .{ .limit = end.row - start.row },
                     });
+                    // FIXME: This doesn't render for some reason
                     _ = try segment.printSegment(.{
                         .text = lines.items[start.row].items[start.column..end.column],
                         .style = .{

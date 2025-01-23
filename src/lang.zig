@@ -254,50 +254,131 @@ pub const TreeSitter = struct {
         });
         // var iter = TreeIterator.init(root);
 
-        var queries_iter = self.queries.elems.iterator();
-        while (queries_iter.next()) |entry| {
-            var query = try zts.Query.init(self.language, entry.key_ptr.*.items);
-            _ = query.captureCount();
-            _ = query.stringCount();
-            _ = query.patternCount();
-            _ = query.startByteForPattern(0);
-            _ = query.endByteForPattern(50);
-            var cursor = try zts.QueryCursor.init();
-            cursor.exec(query, root);
-            cursor.setByteRange(@intCast(window_offset.start), @intCast(window_offset.end));
-            cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(window_height), .column = 0 });
-            var match: zts.QueryMatch = undefined;
-            while (true) {
-                if (!cursor.nextMatch(&match)) {
-                    break;
+        const RenderTask = struct {
+            task: Pool.Task = .{ .callback = @This().callback },
+            wg: *std.Thread.WaitGroup,
+            parent: *TreeSitter,
+            lines: *std.ArrayList(std.ArrayList(u8)),
+            window: vaxis.Window,
+            window_offset: Range,
+            window_lines_offset: Range,
+            window_offset_width: usize,
+            window_offset_height: usize,
+            window_height: usize,
+            highlights: *ThreadHighlights,
+            root: zts.Node,
+
+            fn callback(task: *Pool.Task) void {
+                const self_task: *@This() = @alignCast(@fieldParentPtr("task", task));
+                defer self_task.wg.finish();
+                const idx_start = self_task.highlights.index;
+                const idx_end = idx_start + self_task.highlights.count;
+                for (idx_start..idx_end) |i| {
+                    const query_string = self_task.parent.queries.elems.keys()[i];
+                    // const tags = self_task.parent.queries.elems.get(query_string).?;
+                    var query = zts.Query.init(self_task.parent.language, query_string.items) catch {
+                        std.log.err("Failed to init query", .{});
+                        return;
+                    };
+                    defer query.deinit();
+                    _ = query.captureCount();
+                    _ = query.stringCount();
+                    _ = query.patternCount();
+                    var cursor = zts.QueryCursor.init() catch {
+                        std.log.err("Failed to init query cursor", .{});
+                        return;
+                    };
+                    defer cursor.deinit();
+                    cursor.exec(query, self_task.root);
+                    cursor.setByteRange(@intCast(self_task.window_offset.start), @intCast(self_task.window_offset.end));
+                    cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(self_task.window_height), .column = 0 });
+                    var match: zts.QueryMatch = undefined;
+                    while (true) {
+                        if (!cursor.nextMatch(&match)) {
+                            break;
+                        }
+                        const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
+                        for (0..match.capture_count) |j| {
+                            const node = captures[j].node;
+                            const start = node.getStartPoint();
+                            const end = node.getEndPoint();
+                            // std.log.err("MATCH {d}: {s} :: ({d},{d})", .{ j, lines.items[start.row].items[start.column..end.column], start.column, start.row });
+                            const segment = self_task.window.child(.{
+                                .x_off = start.column - self_task.window_lines_offset.start,
+                                .y_off = start.row,
+                                .width = .{ .limit = end.column - start.column },
+                                .height = .{ .limit = @max(1, end.row - start.row) },
+                            });
+                            _ = segment.printSegment(.{
+                                .text = self_task.lines.items[start.row].items[start.column..end.column],
+                                .style = .{
+                                    .bg = colours.BLACK,
+                                    .fg = colours.WHITE,
+                                    .reverse = false,
+                                },
+                            }, .{}) catch {
+                                std.log.err("FAiled to render", .{});
+                                return;
+                            };
+                        }
+                        cursor.removeMatch(0);
+                    }
                 }
-                const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
-                for (0..match.capture_count) |i| {
-                    const node = captures[i].node;
-                    const start = node.getStartPoint();
-                    const end = node.getEndPoint();
-                    std.log.err("MATCH {d}: {s} :: ({d},{d})", .{ i, lines.items[start.row].items[start.column..end.column], start.column, start.row });
-                    const segment = window.child(.{
-                        .x_off = start.column - window_lines_offset.start,
-                        .y_off = start.row,
-                        .width = .{ .limit = end.column - start.column },
-                        .height = .{ .limit = @max(1, end.row - start.row) },
-                    });
-                    // FIXME: This doesn't render for some reason
-                    _ = try segment.printSegment(.{
-                        .text = lines.items[start.row].items[start.column..end.column],
-                        .style = .{
-                            .bg = colours.BLACK,
-                            .fg = colours.WHITE,
-                            .reverse = false,
-                        },
-                    }, .{});
-                }
-                cursor.removeMatch(0);
             }
-            query.deinit();
-            cursor.deinit();
+        };
+        const tasks: []RenderTask = try self.allocator.alloc(RenderTask, self.per_thread_highlights.len);
+        defer self.allocator.free(tasks);
+        var wg = std.Thread.WaitGroup{};
+        defer wg.wait();
+
+        for (tasks, 0..) |*task, i| {
+            task.* = .{ .wg = &wg, .parent = self, .lines = lines, .window = window, .window_offset = window_offset, .window_lines_offset = window_lines_offset, .window_offset_width = window_offset_width, .window_offset_height = window_offset_height, .window_height = window_height, .highlights = &self.per_thread_highlights[i], .root = root };
+            Pool.schedule(&self.render_thread_pool, &task.task);
         }
+
+        // var queries_iter = self.queries.elems.iterator();
+        // while (queries_iter.next()) |entry| {
+        //     var query = try zts.Query.init(self.language, entry.key_ptr.*.items);
+        //     _ = query.captureCount();
+        //     _ = query.stringCount();
+        //     _ = query.patternCount();
+        //     _ = query.startByteForPattern(0);
+        //     _ = query.endByteForPattern(50);
+        //     var cursor = try zts.QueryCursor.init();
+        //     cursor.exec(query, root);
+        //     cursor.setByteRange(@intCast(window_offset.start), @intCast(window_offset.end));
+        //     cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(window_height), .column = 0 });
+        //     var match: zts.QueryMatch = undefined;
+        //     while (true) {
+        //         if (!cursor.nextMatch(&match)) {
+        //             break;
+        //         }
+        //         const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
+        //         for (0..match.capture_count) |i| {
+        //             const node = captures[i].node;
+        //             const start = node.getStartPoint();
+        //             const end = node.getEndPoint();
+        //             std.log.err("MATCH {d}: {s} :: ({d},{d})", .{ i, lines.items[start.row].items[start.column..end.column], start.column, start.row });
+        //             const segment = window.child(.{
+        //                 .x_off = start.column - window_lines_offset.start,
+        //                 .y_off = start.row,
+        //                 .width = .{ .limit = end.column - start.column },
+        //                 .height = .{ .limit = @max(1, end.row - start.row) },
+        //             });
+        //             _ = try segment.printSegment(.{
+        //                 .text = lines.items[start.row].items[start.column..end.column],
+        //                 .style = .{
+        //                     .bg = colours.BLACK,
+        //                     .fg = colours.WHITE,
+        //                     .reverse = false,
+        //                 },
+        //             }, .{});
+        //         }
+        //         cursor.removeMatch(0);
+        //     }
+        //     query.deinit();
+        //     cursor.deinit();
+        // }
 
         // var line: u32 = 0;
         // var col: u32 = 0;

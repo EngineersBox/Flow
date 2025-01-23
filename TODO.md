@@ -23,9 +23,11 @@
 * [ ] Configurable colour scheme
 * [ ] Configurable key maps
 * [ ] Query tree sitter using language highlights SCM
-* [ ] Thread pool based rendering of each language highlight with main thread rendering un-highlighted text.
+* [X] Thread pool based rendering of each language highlight with main thread rendering un-highlighted text.
 
 ## Refactor
 
 * [X] Optimise language loading to generate switch at compile time
 * [ ] Improve `draw()` call structuring
+* [ ] Cache TS queries off heap (performed by a thread pool) and render cached results. Re-cache queries when tree changes.
+* [ ] Updated cached entries for only section of tree that changes

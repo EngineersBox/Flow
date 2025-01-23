@@ -254,6 +254,12 @@ pub const TreeSitter = struct {
         });
         // var iter = TreeIterator.init(root);
 
+        // TODO: Perform queries in the background via a Pool and cache the results.
+        //       Only re-perform then queries and update the cache when the tree changes.
+        //       If possible, only re-do queries for section of tree that changed.
+        //
+        //       Have a smaller thread pool for rendering (i.e. 2 threads) which will
+        //       render the cached query results (chunked to each thread).
         const RenderTask = struct {
             task: Pool.Task = .{ .callback = @This().callback },
             wg: *std.Thread.WaitGroup,

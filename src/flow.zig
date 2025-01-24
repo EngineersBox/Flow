@@ -106,6 +106,7 @@ pub const Flow = struct {
         if (self.tree_sitter != null) {
             self.tree_sitter.?.deinit();
         }
+        self.config.deinit();
     }
 
     pub fn run(self: *@This()) !void {

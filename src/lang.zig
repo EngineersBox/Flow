@@ -330,9 +330,15 @@ pub const TreeSitter = struct {
         //       that it will need to be. I also feel like I'm going to look at this
         //       comment in future and say "Wow.. that was dumb".. but yeah.
         const keys = self.queries.elems.keys();
+        // FIXME: Change QueryHighlights to store a list of highlights for
+        //        a row index so that moving windows can just index without
+        //        needing to filter through all the highlights every time
+        //        a render call happens.
         for (keys) |key| {
             const query_highlights = self.highlights.get(key) orelse continue;
             for (query_highlights.items) |highlight| {
+                // TODO: Avoid creating a child by setting row/column offsets
+                //       in print_options to print to screen correctly.
                 const child = window.child(highlight.child_options);
                 _ = try child.printSegment(highlight.segment, highlight.print_options);
             }

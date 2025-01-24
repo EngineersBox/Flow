@@ -3,7 +3,8 @@ const zts = @import("zts");
 const vaxis = @import("vaxis");
 const colours = @import("colours.zig");
 const logToFile = @import("log.zig").logToFile;
-const Queries = @import("query.zig");
+const Query = @import("query.zig").Query;
+const Queries = @import("query.zig").Queries;
 const Pool = @import("zap");
 const config = @import("config.zig");
 const known_folders = @import("known-folders");
@@ -151,6 +152,103 @@ fn partitionHighlights(highlights: []ThreadHighlights, query_count: usize, threa
     }
 }
 
+const Highlight = struct {
+    child_options: vaxis.Window.ChildOptions,
+    segment: vaxis.Segment,
+    print_options: vaxis.PrintOptions,
+};
+const Highlights = std.ArrayList(Highlight);
+const QueryHighlightsContext = struct {
+    pub fn hash(self: @This(), s: Query) u32 {
+        _ = self;
+        return std.array_hash_map.hashString(s.items);
+    }
+    pub fn eql(self: @This(), a: Query, b: Query, b_index: usize) bool {
+        _ = self;
+        _ = b_index;
+        return std.array_hash_map.eqlString(a.items, b.items);
+    }
+};
+const QueryHighlights = std.ArrayHashMap(Query, Highlights, QueryHighlightsContext, true);
+
+const QueryTask = struct {
+    task: Pool.Task = .{ .callback = @This().callback },
+    wg: *std.Thread.WaitGroup,
+    parent: *TreeSitter,
+    lines: *std.ArrayList(std.ArrayList(u8)),
+    window_offset: Range,
+    window_lines_offset: Range,
+    window_offset_width: usize,
+    window_offset_height: usize,
+    window_height: usize,
+    highlights: *ThreadHighlights,
+    root: zts.Node,
+
+    fn callback(task: *Pool.Task) void {
+        const self: *@This() = @alignCast(@fieldParentPtr("task", task));
+        defer self.wg.finish();
+        const idx_start = self.highlights.index;
+        const idx_end = idx_start + self.highlights.count;
+        for (idx_start..idx_end) |i| {
+            const query_string = self.parent.queries.elems.keys()[i];
+            var query = zts.Query.init(self.parent.language, query_string.items) catch {
+                std.log.err("Failed to init query", .{});
+                continue;
+            };
+            defer query.deinit();
+            _ = query.captureCount();
+            _ = query.stringCount();
+            _ = query.patternCount();
+            _ = query.startByteForPattern(0);
+            _ = query.endByteForPattern(@intCast(query_string.items.len));
+            var cursor = zts.QueryCursor.init() catch {
+                std.log.err("Failed to init query cursor", .{});
+                continue;
+            };
+            defer cursor.deinit();
+            cursor.exec(query, self.root);
+            cursor.setByteRange(@intCast(self.window_offset.start), @intCast(self.window_offset.end));
+            cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(self.window_height), .column = 0 });
+            var match: zts.QueryMatch = undefined;
+            var highlights = Highlights.init(self.parent.allocator);
+            while (true) {
+                if (!cursor.nextMatch(&match)) {
+                    break;
+                }
+                const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
+                for (0..match.capture_count) |j| {
+                    const node = captures[j].node;
+                    const start = node.getStartPoint();
+                    const end = node.getEndPoint();
+                    highlights.append(Highlight{
+                        .child_options = .{
+                            .x_off = start.column - self.window_lines_offset.start,
+                            .y_off = start.row,
+                            .width = .{ .limit = end.column - start.column },
+                            .height = .{ .limit = @max(1, end.row - start.row) },
+                        },
+                        .segment = .{
+                            .text = self.lines.items[start.row].items[start.column..end.column],
+                            .style = .{
+                                .bg = colours.BLACK,
+                                .fg = colours.WHITE,
+                                .reverse = false,
+                            },
+                        },
+                        .print_options = .{},
+                    }) catch {
+                        std.log.err("Failed to append highlight capture {d} for query {s}", .{ j, query_string.items });
+                    };
+                }
+                cursor.removeMatch(0);
+            }
+            self.parent.highlights.put(query_string, highlights) catch {
+                std.log.err("Failed to store {d} highlights for query: {s}", .{ highlights.items.len, query_string.items });
+            };
+        }
+    }
+};
+
 pub const TreeSitter = struct {
     allocator: std.mem.Allocator,
     language: *const zts.Language,
@@ -159,6 +257,7 @@ pub const TreeSitter = struct {
     queries: Queries,
     line: usize,
     per_thread_highlights: []ThreadHighlights,
+    highlights: QueryHighlights,
     render_thread_pool: Pool,
 
     pub fn initFromFileExtension(allocator: std.mem.Allocator, extension: []const u8) !?TreeSitter {
@@ -189,6 +288,7 @@ pub const TreeSitter = struct {
             .queries = queries,
             .line = 0,
             .per_thread_highlights = per_thread_highlights,
+            .highlights = QueryHighlights.init(allocator),
             .render_thread_pool = Pool.init(@max(1, std.Thread.getCpuCount() catch 1)),
         };
     }
@@ -196,240 +296,46 @@ pub const TreeSitter = struct {
     pub fn deinit(self: *@This()) void {
         self.parser.deinit();
         self.queries.deinit();
+        self.allocator.free(self.per_thread_highlights);
+        self.render_thread_pool.deinit();
+        self.highlights.deinit();
     }
 
-    pub fn parseBuffer(self: *@This(), buffer: []const u8) !void {
+    pub fn parseBuffer(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8)), window_offset: Range, window_lines_offset: Range, window_offset_width: usize, window_offset_height: usize, window_height: usize) !void {
         self.tree = try self.parser.parseString(self.tree, buffer);
-    }
-
-    inline fn lineWidth(line: []const u8, window_width: usize) usize {
-        if (line.len > window_width) {
-            return window_width;
-        } else if (line.len > 1 and std.mem.eql(u8, line[line.len - 1 ..], "\n")) {
-            return line.len - 1;
+        var iter = self.highlights.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit();
         }
-        return line.len;
-    }
-
-    // TODO: Move this elsewhere, it belongs somewhere that centralises
-    //       rendering operations together.
-    fn drawLine(self: *@This(), line: []const u8, y_offset: usize, window: vaxis.Window) !void {
-        const new_tree = try self.parser.parseString(self.tree, line);
-        if (self.tree) |old_tree| {
-            old_tree.deinit();
-        }
-        self.tree = new_tree;
-        const root = self.tree.?.rootNode();
-        try logToFile("{s}\n", .{root.toString()});
-        const width: usize = lineWidth(line, window.width);
-        const child: vaxis.Window = window.child(.{
-            .x_off = 0,
-            .y_off = y_offset,
-            .width = .{ .limit = width },
-            .height = .{ .limit = 1 },
-        });
-        _ = try child.printSegment(.{ .text = line, .style = .{
-            .bg = colours.BLACK,
-            .fg = colours.WHITE,
-            .reverse = false,
-        } }, .{});
-    }
-
-    // fn drawHighlights(self: *@This()) void {
-    //     const Work = struct {
-    //         task: Pool.Task = .{ .callback = @This().callback },
-    //         wg: *std.Thread.WaitGroup,
-    //
-    //         fn callback(task: *Pool.Task) void {
-    //             const task_self: *@This() = @alignCast(@fieldParentPtr("task", task));
-    //             task_self.wg.finish();
-    //         }
-    //     };
-    // }
-
-    pub fn drawBuffer(self: *@This(), lines: *std.ArrayList(std.ArrayList(u8)), window: vaxis.Window, window_offset: Range, window_lines_offset: Range, window_offset_width: usize, window_offset_height: usize, window_height: usize) !void {
+        self.highlights.deinit();
+        self.highlights = QueryHighlights.init(self.allocator);
         const root = self.tree.?.rootNodeWithOffset(@intCast(window_offset.start), .{
             .row = @intCast(window_offset_width),
             .column = @intCast(window_offset_height),
         });
-        // var iter = TreeIterator.init(root);
-
-        // TODO: Perform queries in the background via a Pool and cache the results.
-        //       Only re-perform then queries and update the cache when the tree changes.
-        //       If possible, only re-do queries for section of tree that changed.
-        //
-        //       Have a smaller thread pool for rendering (i.e. 2 threads) which will
-        //       render the cached query results (chunked to each thread).
-        const RenderTask = struct {
-            task: Pool.Task = .{ .callback = @This().callback },
-            wg: *std.Thread.WaitGroup,
-            parent: *TreeSitter,
-            lines: *std.ArrayList(std.ArrayList(u8)),
-            window: vaxis.Window,
-            window_offset: Range,
-            window_lines_offset: Range,
-            window_offset_width: usize,
-            window_offset_height: usize,
-            window_height: usize,
-            highlights: *ThreadHighlights,
-            root: zts.Node,
-
-            fn callback(task: *Pool.Task) void {
-                const self_task: *@This() = @alignCast(@fieldParentPtr("task", task));
-                defer self_task.wg.finish();
-                const idx_start = self_task.highlights.index;
-                const idx_end = idx_start + self_task.highlights.count;
-                for (idx_start..idx_end) |i| {
-                    const query_string = self_task.parent.queries.elems.keys()[i];
-                    // const tags = self_task.parent.queries.elems.get(query_string).?;
-                    var query = zts.Query.init(self_task.parent.language, query_string.items) catch {
-                        std.log.err("Failed to init query", .{});
-                        return;
-                    };
-                    defer query.deinit();
-                    _ = query.captureCount();
-                    _ = query.stringCount();
-                    _ = query.patternCount();
-                    _ = query.startByteForPattern(0);
-                    _ = query.endByteForPattern(50);
-                    var cursor = zts.QueryCursor.init() catch {
-                        std.log.err("Failed to init query cursor", .{});
-                        return;
-                    };
-                    defer cursor.deinit();
-                    cursor.exec(query, self_task.root);
-                    cursor.setByteRange(@intCast(self_task.window_offset.start), @intCast(self_task.window_offset.end));
-                    cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(self_task.window_height), .column = 0 });
-                    var match: zts.QueryMatch = undefined;
-                    while (true) {
-                        if (!cursor.nextMatch(&match)) {
-                            break;
-                        }
-                        const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
-                        for (0..match.capture_count) |j| {
-                            const node = captures[j].node;
-                            const start = node.getStartPoint();
-                            const end = node.getEndPoint();
-                            // std.log.err("MATCH {d}: {s} :: ({d},{d})", .{ j, lines.items[start.row].items[start.column..end.column], start.column, start.row });
-                            const segment = self_task.window.child(.{
-                                .x_off = start.column - self_task.window_lines_offset.start,
-                                .y_off = start.row,
-                                .width = .{ .limit = end.column - start.column },
-                                .height = .{ .limit = @max(1, end.row - start.row) },
-                            });
-                            _ = segment.printSegment(.{
-                                .text = self_task.lines.items[start.row].items[start.column..end.column],
-                                .style = .{
-                                    .bg = colours.BLACK,
-                                    .fg = colours.WHITE,
-                                    .reverse = false,
-                                },
-                            }, .{}) catch {
-                                std.log.err("Failed to render", .{});
-                                return;
-                            };
-                        }
-                        cursor.removeMatch(0);
-                    }
-                }
-            }
-        };
-        const tasks: []RenderTask = try self.allocator.alloc(RenderTask, self.per_thread_highlights.len);
+        const tasks: []QueryTask = try self.allocator.alloc(QueryTask, self.per_thread_highlights.len);
         defer self.allocator.free(tasks);
         var wg = std.Thread.WaitGroup{};
         defer wg.wait();
 
         for (tasks, 0..) |*task, i| {
             wg.start();
-            task.* = .{ .wg = &wg, .parent = self, .lines = lines, .window = window, .window_offset = window_offset, .window_lines_offset = window_lines_offset, .window_offset_width = window_offset_width, .window_offset_height = window_offset_height, .window_height = window_height, .highlights = &self.per_thread_highlights[i], .root = root };
+            task.* = .{ .wg = &wg, .parent = self, .lines = lines, .window_offset = window_offset, .window_lines_offset = window_lines_offset, .window_offset_width = window_offset_width, .window_offset_height = window_offset_height, .window_height = window_height, .highlights = &self.per_thread_highlights[i], .root = root };
             Pool.schedule(&self.render_thread_pool, &task.task);
         }
+    }
 
-        // var queries_iter = self.queries.elems.iterator();
-        // while (queries_iter.next()) |entry| {
-        //     var query = try zts.Query.init(self.language, entry.key_ptr.*.items);
-        //     _ = query.captureCount();
-        //     _ = query.stringCount();
-        //     _ = query.patternCount();
-        //     _ = query.startByteForPattern(0);
-        //     _ = query.endByteForPattern(50);
-        //     var cursor = try zts.QueryCursor.init();
-        //     cursor.exec(query, root);
-        //     cursor.setByteRange(@intCast(window_offset.start), @intCast(window_offset.end));
-        //     cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(window_height), .column = 0 });
-        //     var match: zts.QueryMatch = undefined;
-        //     while (true) {
-        //         if (!cursor.nextMatch(&match)) {
-        //             break;
-        //         }
-        //         const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
-        //         for (0..match.capture_count) |i| {
-        //             const node = captures[i].node;
-        //             const start = node.getStartPoint();
-        //             const end = node.getEndPoint();
-        //             std.log.err("MATCH {d}: {s} :: ({d},{d})", .{ i, lines.items[start.row].items[start.column..end.column], start.column, start.row });
-        //             const segment = window.child(.{
-        //                 .x_off = start.column - window_lines_offset.start,
-        //                 .y_off = start.row,
-        //                 .width = .{ .limit = end.column - start.column },
-        //                 .height = .{ .limit = @max(1, end.row - start.row) },
-        //             });
-        //             _ = try segment.printSegment(.{
-        //                 .text = lines.items[start.row].items[start.column..end.column],
-        //                 .style = .{
-        //                     .bg = colours.BLACK,
-        //                     .fg = colours.WHITE,
-        //                     .reverse = false,
-        //                 },
-        //             }, .{});
-        //         }
-        //         cursor.removeMatch(0);
-        //     }
-        //     query.deinit();
-        //     cursor.deinit();
-        // }
-
-        // var line: u32 = 0;
-        // var col: u32 = 0;
-        // std.log.err("Field count: {d}", .{self.language.getFieldCount()});
-        // for (1..self.language.getFieldCount()) |i| {
-        //     std.log.err("Field {d}: {s}", .{ i, self.language.getFieldNameForId(@intCast(i)) });
-        // }
-        // while (iter.next()) |node| {
-        //     std.log.err("{s}", .{node.toString()});
-        //     if (node.getChildCount() > 0) {
-        //         std.log.err("{s}", .{node.toString()});
-        //         // Only render leaf nodes that correspond to actual buffer symbols
-        //         continue;
-        //     }
-        //     const start = node.getStartPoint();
-        //     if (start.row > window_height) {
-        //         // Reached the limit on lines
-        //         break;
-        //     }
-        //     if (line != start.row) {
-        //         while (line < start.row) : (line += 1) {
-        //             try logToFile("\n", .{});
-        //         }
-        //         col = 0;
-        //     }
-        //     // NOTE: After converting to render code, this can be
-        //     //       just an allocated array with a @memset
-        //     while (col < start.column) : (col += 1) {
-        //         try logToFile(" ", .{});
-        //     }
-        //     const end = node.getEndPoint();
-        //     if (!node.isNamed() and self.language.getSymbolType(node.getSymbol()) == zts.SymbolType.anonymous) {
-        //         // Literal character as a node
-        //         try logToFile("{s}", .{node.getType()});
-        //     } else {
-        //         // Segment of buffer content
-        //         const string = lines.items[line];
-        //         try logToFile("{s}", .{string.items[start.column..end.column]});
-        //     }
-        //     col = end.column;
-        // }
-        // iter.deinit();
-        // return error.DebugError;
+    pub fn drawBuffer(self: *@This(), window: vaxis.Window) !void {
+        // NOTE: If necessary at some stage this can be parallelised, but I doubt
+        //       that it will need to be. I also feel like I'm going to look at this
+        //       comment in future and say "Wow.. that was dumb".. but yeah.
+        const keys = self.queries.elems.keys();
+        for (keys) |key| {
+            const query_highlights = self.highlights.get(key) orelse continue;
+            for (query_highlights.items) |highlight| {
+                const child = window.child(highlight.child_options);
+                _ = try child.printSegment(highlight.segment, highlight.print_options);
+            }
+        }
     }
 };

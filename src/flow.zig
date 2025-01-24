@@ -72,7 +72,7 @@ pub const Flow = struct {
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
         var extension: []const u8 = std.fs.path.extension(file_path);
         extension = std.mem.trimLeft(u8, extension, ".");
-        const config = Config.default;
+        const config = try Config.init(allocator);
         const tab_spaces_buffer = try allocator.alloc(u8, config.spaces_per_tab);
         @memset(tab_spaces_buffer, @as(u8, @intCast(' ')));
         return .{
@@ -120,6 +120,12 @@ pub const Flow = struct {
         try self.vx.queryTerminal(self.tty.anyWriter(), 5 * std.time.ns_per_s);
         try self.vx.setMouseMode(self.tty.anyWriter(), true);
         try self.setBufferWindow(0, @intCast(self.vx.screen.height));
+        while (self.vx.screen.height == 0) {
+            loop.pollEvent();
+            while (loop.tryEvent()) |event| {
+                try self.update(event);
+            }
+        }
         if (self.tree_sitter != null) {
             // Parse the loaded buffer
             var buffer = std.ArrayList(u8).init(self.allocator);
@@ -128,7 +134,7 @@ pub const Flow = struct {
                 try buffer.appendSlice(line.items);
                 line.deinit();
             }
-            try self.tree_sitter.?.parseBuffer(buffer.items);
+            try self.tree_sitter.?.parseBuffer(buffer.items, &self.window_lines, self.buffer.buffer_offset_range_indicies.?, self.buffer.buffer_line_range_indicies.?, 0, 0, self.vx.screen.height - 1);
             buffer.deinit();
         }
         while (!self.should_quit) {
@@ -500,7 +506,7 @@ pub const Flow = struct {
         //      makes it a constant value and not variable (which is
         //      needed here).
         if (self.tree_sitter != null) {
-            try self.tree_sitter.?.drawBuffer(&self.window_lines, window, self.buffer.buffer_offset_range_indicies.?, self.buffer.buffer_line_range_indicies.?, 0, 0, self.vx.screen.height - 1);
+            try self.tree_sitter.?.drawBuffer(window);
         } else {
             const lines = self.window_lines.items[self.buffer.buffer_line_range_indicies.?.start..self.buffer.buffer_line_range_indicies.?.end];
             for (lines, 0..) |line, y_offset| {

@@ -9,7 +9,7 @@ const FileBufferIterator = fb.FileBufferIterator;
 const Range = fb.Range;
 const logToFile = @import("log.zig").logToFile;
 const TreeSitter = @import("lang.zig").TreeSitter;
-const Config = @import("config.zig");
+const Config = @import("config.zig").Config;
 const zts = @import("zts");
 
 /// Set the default panic handler to the vaxis panic_handler. This will clean up the terminal if any
@@ -73,7 +73,7 @@ pub const Flow = struct {
         var extension: []const u8 = std.fs.path.extension(file_path);
         extension = std.mem.trimLeft(u8, extension, ".");
         const config = try Config.init(allocator);
-        const tab_spaces_buffer = try allocator.alloc(u8, config.spaces_per_tab);
+        const tab_spaces_buffer = try allocator.alloc(u8, config.properties.spaces_per_tab);
         @memset(tab_spaces_buffer, @as(u8, @intCast(' ')));
         return .{
             .allocator = allocator,
@@ -355,7 +355,7 @@ pub const Flow = struct {
                 try self.buffer.insert(self.cursor_offset, self.tab_spaces_buffer);
                 const line = self.getCurrentLine();
                 try line.insertSlice(self.vx.screen.cursor_col, self.tab_spaces_buffer);
-                try self.shiftCursorCol(@intCast(self.config.spaces_per_tab));
+                try self.shiftCursorCol(@intCast(self.config.properties.spaces_per_tab));
             },
             vaxis.Key.delete => {
                 if (self.cursor_offset == self.buffer.meta.size - 1) {

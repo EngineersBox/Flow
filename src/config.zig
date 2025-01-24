@@ -10,18 +10,21 @@ pub const TREE_SITTER_QUERIES_PATH: []const u8 = "/flow/queries/";
 pub const CONFIG_PATH: []const u8 = "/flow/config.json";
 pub const THEME_PATH: []const u8 = "/flow/theme.config";
 
-fn loadJson(allocator: std.mem.Allocator, path: []const u8, comptime T: type) error{ NoDotConfigDirectory, OutOfMemory }!T {
+const MaxFileSize: usize = 1 * 1024 * 1024 * 1024; // 1 GB
+
+fn loadJson(allocator: std.mem.Allocator, path: []const u8, comptime T: type) !T {
     const json_path = try known_folders.getPath(allocator, known_folders.KnownFolder.roaming_configuration) orelse return error.NoDotConfigDirectory;
     defer allocator.free(json_path);
     const original_length = json_path.len;
-    if (!allocator.resize(json_path, json_path.len + path.len)) {
-        error.OutOfMemory;
-    }
-    @memcpy(json_path[original_length], path);
-    const file = try std.fs.openFileAbsolute(json_path, .{ .mode = .read_only });
-    const file_contents = try file.readToEndAlloc(allocator, json_path);
+    var full_path = try allocator.alloc(u8, json_path.len + path.len);
+    defer allocator.free(full_path);
+    @memcpy(full_path[0..json_path.len], json_path);
+    @memcpy(full_path[original_length..], path);
+    std.log.err("LOADING: {s}", .{full_path});
+    const file = try std.fs.openFileAbsolute(full_path, .{ .mode = .read_only });
+    const file_contents = try file.readToEndAlloc(allocator, MaxFileSize);
     defer allocator.free(file_contents);
-    return json.fromSliceLeaky(allocator, file_contents);
+    return json.fromSliceLeaky(allocator, T, file_contents);
 }
 
 // Mappings for literal file structure
@@ -53,8 +56,9 @@ const _ThemeHighlight = union(_ThemeHighlightType) {
         var colour: u24 = 0x0;
         for (value[1..], 0..) |char, i| {
             switch (char) {
-                '0'...'9' => colour |= (value - '0') << (20 - (i * 4)),
-                'a'...'f' => colour |= (value - 'a' + 0xa) << (20 - (i * 4)),
+                '0'...'9' => colour |= @as(u24, @intCast(char - '0')) << @intCast(20 - (i * 4)),
+                'a'...'f' => colour |= @as(u24, @intCast(char - 'a' + 0xa)) << @intCast(20 - (i * 4)),
+                'A'...'F' => colour |= @as(u24, @intCast(char - 'A' + 0xa)) << @intCast(20 - (i * 4)),
                 else => return error.InvalidColour,
             }
         }
@@ -72,9 +76,19 @@ const _ThemeHighlight = union(_ThemeHighlightType) {
 
     pub fn internalise(self: *@This()) !ThemeHighlight {
         if (self.ansi) |ansi| {
-            return try ansiToColour(ansi);
+            return .{
+                .color = ansiToColour(ansi),
+                .underline = false,
+                .italic = false,
+                .bold = false,
+            };
         } else if (self.string) |string| {
-            return try stringToColour(string);
+            return .{
+                .color = try stringToColour(string),
+                .underline = false,
+                .italic = false,
+                .bold = false,
+            };
         } else if (self.structure) |structure| {
             return .{
                 .color = try stringToColour(structure.color),
@@ -99,13 +113,13 @@ const ThemeHighlight = struct {
 pub const Theme = std.StringHashMap(ThemeHighlight);
 
 fn loadTheme(allocator: std.mem.Allocator) !Theme {
-    const theme_map = try loadJson(allocator, THEME_PATH, _Theme);
+    var theme_map = try loadJson(allocator, THEME_PATH, _Theme);
     theme_map.deinit();
-    const theme = Theme.init(allocator);
+    var theme = Theme.init(allocator);
     var iter = theme_map.iterator();
     while (iter.next()) |entry| {
         const key = try allocator.dupe(u8, entry.key_ptr.*);
-        try theme.put(key, entry.value_ptr.internalise());
+        try theme.put(key, try entry.value_ptr.internalise());
     }
     return theme;
 }
@@ -134,19 +148,19 @@ pub const Config = struct {
     pub fn init(allocator: std.mem.Allocator) !@This() {
         return .{
             .allocator = allocator,
-            .properties = Properties.init(allocator),
-            .theme = Theme.init(allocator),
+            .properties = try Properties.init(allocator),
+            .theme = try loadTheme(allocator),
         };
     }
 
     pub fn deinit(self: *@This()) void {
         self.properties.deinit();
-        if (self.theme) |theme| {
-            var iter = theme.iterator();
+        if (self.theme != null) {
+            var iter = self.theme.?.iterator();
             while (iter.next()) |entry| {
                 self.allocator.free(entry.key_ptr.*);
             }
-            theme.clearAndFree();
+            self.theme.?.clearAndFree();
         }
     }
 

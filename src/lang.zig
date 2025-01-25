@@ -6,7 +6,7 @@ const logToFile = @import("log.zig").logToFile;
 const Query = @import("query.zig").Query;
 const Queries = @import("query.zig").Queries;
 const Pool = @import("zap");
-const config = @import("config.zig");
+const Config = @import("config.zig").Config;
 const known_folders = @import("known-folders");
 const json = @import("json");
 const fb = @import("buffer.zig");
@@ -191,6 +191,7 @@ const QueryTask = struct {
         const idx_end = idx_start + self.highlights.count;
         for (idx_start..idx_end) |i| {
             const query_string = self.parent.queries.elems.keys()[i];
+            const tags = self.parent.queries.elems.get(query_string);
             var query = zts.Query.init(self.parent.language, query_string.items) catch {
                 std.log.err("Failed to init query", .{});
                 continue;
@@ -220,6 +221,17 @@ const QueryTask = struct {
                     const node = captures[j].node;
                     const start = node.getStartPoint();
                     const end = node.getEndPoint();
+                    var style: vaxis.Style = .{};
+                    if (tags and tags.?.items.len > 0) {
+                        const tag = tags.?.getLast();
+                        const theme_highlight = self.parent.config.theme.get(tag);
+                        if (theme_highlight) |hl| {
+                            style.fg = hl.colour;
+                            style.bold = hl.bold;
+                            style.italic = hl.italic;
+                            style.ul = hl.underline;
+                        }
+                    }
                     highlights.append(Highlight{
                         .child_options = .{
                             .x_off = start.column - self.window_lines_offset.start,
@@ -229,11 +241,7 @@ const QueryTask = struct {
                         },
                         .segment = .{
                             .text = self.lines.items[start.row].items[start.column..end.column],
-                            .style = .{
-                                .bg = colours.BLACK,
-                                .fg = colours.WHITE,
-                                .reverse = false,
-                            },
+                            .style = style,
                         },
                         .print_options = .{},
                     }) catch {
@@ -251,6 +259,7 @@ const QueryTask = struct {
 
 pub const TreeSitter = struct {
     allocator: std.mem.Allocator,
+    config: *const Config,
     language: *const zts.Language,
     parser: *zts.Parser,
     tree: ?*zts.Tree,
@@ -260,14 +269,14 @@ pub const TreeSitter = struct {
     highlights: QueryHighlights,
     render_thread_pool: Pool,
 
-    pub fn initFromFileExtension(allocator: std.mem.Allocator, extension: []const u8) !?TreeSitter {
+    pub fn initFromFileExtension(allocator: std.mem.Allocator, config: *const Config, extension: []const u8) !?TreeSitter {
         const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
             return null;
         };
-        return try TreeSitter.init(allocator, try loadGrammar(grammar));
+        return try TreeSitter.init(allocator, config, try loadGrammar(grammar));
     }
 
-    pub fn init(allocator: std.mem.Allocator, language: *const zts.Language) !TreeSitter {
+    pub fn init(allocator: std.mem.Allocator, config: *const Config, language: *const zts.Language) !TreeSitter {
         const parser = try zts.Parser.init();
         try parser.setLanguage(language);
         const hl_file = try std.fs.openFileAbsolute("/Users/jackkilrain/.config/flow/queries/zig/highlights.scm", .{ .mode = .read_only });
@@ -282,6 +291,7 @@ pub const TreeSitter = struct {
         partitionHighlights(per_thread_highlights, query_count, thread_count);
         return .{
             .allocator = allocator,
+            .config = config,
             .language = language,
             .parser = parser,
             .tree = null,

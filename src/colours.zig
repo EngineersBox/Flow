@@ -60,3 +60,28 @@ pub fn colourFromANSI256(ansi: u8) vaxis.Color {
     const index = ((ansi - 232) * 10) + 8;
     return vaxis.Color.rgbFromUint(@as(u24, @intCast(index)) * 0x010101);
 }
+
+fn hexToColour(value: []const u8) error{InvalidColour}!vaxis.Color {
+    if (value.len != 7) {
+        return error.InvalidColour;
+    }
+    var colour: u24 = 0x0;
+    for (value[1..], 0..) |char, i| {
+        switch (char) {
+            '0'...'9' => colour |= @as(u24, @intCast(char - '0')) << @intCast(20 - (i * 4)),
+            'a'...'f' => colour |= @as(u24, @intCast(char - 'a' + 0xa)) << @intCast(20 - (i * 4)),
+            'A'...'F' => colour |= @as(u24, @intCast(char - 'A' + 0xa)) << @intCast(20 - (i * 4)),
+            else => return error.InvalidColour,
+        }
+    }
+    return vaxis.Color.rgbFromUint(colour);
+}
+
+pub fn stringToColour(value: []const u8) error{InvalidColour}!vaxis.Color {
+    if (value.len == 0) {
+        return error.InvalidColour;
+    } else if (value[0] == '#') {
+        return try hexToColour(value);
+    }
+    return ANSI_NAMED.get(value) orelse error.InvalidColour;
+}

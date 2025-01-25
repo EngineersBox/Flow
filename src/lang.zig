@@ -169,7 +169,39 @@ const QueryHighlightsContext = struct {
         return std.array_hash_map.eqlString(a.items, b.items);
     }
 };
-const QueryHighlights = std.ArrayHashMap(Query, Highlights, QueryHighlightsContext, true);
+const QueryHighlights = struct {
+    allocator: std.mem.Allocator,
+    rwlock: std.Thread.RwLock,
+    map: std.ArrayHashMap(Query, Highlights, QueryHighlightsContext, true),
+
+    pub fn init(allocator: std.mem.Allocator) @This() {
+        return .{
+            .allocator = allocator,
+            .rwlock = std.Thread.RwLock{},
+            .map = std.ArrayHashMap(Query, Highlights, QueryHighlightsContext, true).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        var iter = self.map.iterator();
+        while (iter.next()) |entry| {
+            entry.value_ptr.deinit();
+        }
+        self.map.deinit();
+    }
+
+    pub fn put(self: *@This(), query: Query, highlights: Highlights) !void {
+        self.rwlock.lock();
+        defer self.rwlock.unlock();
+        try self.map.put(query, highlights);
+    }
+
+    pub fn get(self: *@This(), query: Query) ?Highlights {
+        self.rwlock.lockShared();
+        defer self.rwlock.unlockShared();
+        return self.map.get(query);
+    }
+};
 
 const QueryTask = struct {
     task: Pool.Task = .{ .callback = @This().callback },
@@ -222,14 +254,16 @@ const QueryTask = struct {
                     const start = node.getStartPoint();
                     const end = node.getEndPoint();
                     var style: vaxis.Style = .{};
-                    if (tags and tags.?.items.len > 0) {
+                    if (tags != null and tags.?.items.len > 0) {
                         const tag = tags.?.getLast();
-                        const theme_highlight = self.parent.config.theme.get(tag);
+                        const theme_highlight = self.parent.config.theme.get(tag.items);
                         if (theme_highlight) |hl| {
                             style.fg = hl.colour;
                             style.bold = hl.bold;
                             style.italic = hl.italic;
-                            style.ul = hl.underline;
+                            if (hl.underline) {
+                                style.ul = hl.colour;
+                            }
                         }
                     }
                     highlights.append(Highlight{
@@ -313,10 +347,6 @@ pub const TreeSitter = struct {
 
     pub fn parseBuffer(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8)), window_offset: Range, window_lines_offset: Range, window_offset_width: usize, window_offset_height: usize, window_height: usize) !void {
         self.tree = try self.parser.parseString(self.tree, buffer);
-        var iter = self.highlights.iterator();
-        while (iter.next()) |entry| {
-            entry.value_ptr.deinit();
-        }
         self.highlights.deinit();
         self.highlights = QueryHighlights.init(self.allocator);
         const root = self.tree.?.rootNodeWithOffset(@intCast(window_offset.start), .{

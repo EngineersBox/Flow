@@ -1,8 +1,6 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
 const toml = @import("zig-toml");
-const getty = @import("getty");
-const json = @import("json");
 const known_folders = @import("known-folders");
 const colours = @import("colours.zig");
 // const re = @cImport(@cInclude("regez.h"));
@@ -27,6 +25,8 @@ fn loadJson(allocator: std.mem.Allocator, comptime path: []const u8, comptime T:
     return try std.json.parseFromSlice(T, allocator, file_contents, .{ .allocate = .alloc_always, .duplicate_field_behavior = .use_first });
 }
 
+// Mappings for literal file structure
+
 const ThemeHighlightInternal = struct {
     colour: []const u8,
     underline: bool = false,
@@ -36,7 +36,7 @@ const ThemeHighlightInternal = struct {
 
 const ThemeInternal = std.json.ArrayHashMap(ThemeHighlightInternal);
 
-// Mappings for literal file structure
+// Transformed structures from literal mappings
 
 pub const ThemeHighlight = struct {
     colour: vaxis.Color,

@@ -9,6 +9,7 @@
 * [X] Backspace at start of line seems to fail sometimes and join only part of the line
 * [X] Cursor at end of document moving to the right causes a crash when there is no newline at the end
 * [ ] Hard to replicate issue where `shiftCursorRow` indexes window lines out of bounds. Implies `self.vx.screen.cursor_row` is not updated correctly in some operation beforehand, likely to with insert/delete at the end of the buffer
+* [ ] `RwLock` synchonrisation over `QueryHighlights` map is a naive solution that needs better management. Maybe a segmented distributed map?
 
 ## Implement
 
@@ -20,14 +21,14 @@
 * [X] Treesitter parsing for lines in buffer, using output to style line segments
 * [X] Thread pool based rendering of each language highlight with main thread rendering un-highlighted text.
 * [ ] Range based delete via visual mode
-* [ ] Config loading
-* [ ] Configurable colour scheme
+* [X] Config loading
+* [X] Configurable colour scheme
 * [ ] Configurable key maps
-* [ ] Query tree sitter using language highlights SCM
+* [X] Query tree sitter using language highlights SCM
 
 ## Refactor
 
 * [X] Optimise language loading to generate switch at compile time
 * [ ] Improve `draw()` call structuring
-* [ ] Cache TS queries off heap (performed by a thread pool) and render cached results. Re-cache queries when tree changes.
+* [X] Cache TS queries off heap (performed by a thread pool) and render cached results. Re-cache queries when tree changes.
 * [ ] Updated cached entries for only section of tree that changes

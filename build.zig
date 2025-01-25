@@ -29,14 +29,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const getty = b.dependency("getty", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const json = b.dependency("json", .{
-        .target = target,
-        .optimize = optimize,
-    });
     const exe = b.addExecutable(.{
         .name = "flow",
         .root_source_file = b.path("src/main.zig"),
@@ -51,8 +43,6 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("zap", zap.module("zap"));
     exe.root_module.addImport("known-folders", known_folders.module("known-folders"));
     exe.root_module.addImport("zig-toml", toml.module("zig-toml"));
-    exe.root_module.addImport("getty", getty.module("getty"));
-    exe.root_module.addImport("json", json.module("json"));
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

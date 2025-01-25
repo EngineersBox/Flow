@@ -2,7 +2,6 @@ const std = @import("std");
 const zts = @import("zts");
 const vaxis = @import("vaxis");
 const colours = @import("colours.zig");
-const logToFile = @import("log.zig").logToFile;
 const Query = @import("query.zig").Query;
 const Queries = @import("query.zig").Queries;
 const Pool = @import("zap");
@@ -293,24 +292,23 @@ const QueryTask = struct {
 
 pub const TreeSitter = struct {
     allocator: std.mem.Allocator,
-    config: *const Config,
+    config: Config,
     language: *const zts.Language,
     parser: *zts.Parser,
     tree: ?*zts.Tree,
     queries: Queries,
-    line: usize,
     per_thread_highlights: []ThreadHighlights,
     highlights: QueryHighlights,
     render_thread_pool: Pool,
 
-    pub fn initFromFileExtension(allocator: std.mem.Allocator, config: *const Config, extension: []const u8) !?TreeSitter {
+    pub fn initFromFileExtension(allocator: std.mem.Allocator, config: Config, extension: []const u8) !?TreeSitter {
         const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
             return null;
         };
         return try TreeSitter.init(allocator, config, try loadGrammar(grammar));
     }
 
-    pub fn init(allocator: std.mem.Allocator, config: *const Config, language: *const zts.Language) !TreeSitter {
+    pub fn init(allocator: std.mem.Allocator, config: Config, language: *const zts.Language) !TreeSitter {
         const parser = try zts.Parser.init();
         try parser.setLanguage(language);
         const hl_file = try std.fs.openFileAbsolute("/Users/jackkilrain/.config/flow/queries/zig/highlights.scm", .{ .mode = .read_only });
@@ -330,7 +328,6 @@ pub const TreeSitter = struct {
             .parser = parser,
             .tree = null,
             .queries = queries,
-            .line = 0,
             .per_thread_highlights = per_thread_highlights,
             .highlights = QueryHighlights.init(allocator),
             .render_thread_pool = Pool.init(@max(1, std.Thread.getCpuCount() catch 1)),
@@ -357,7 +354,6 @@ pub const TreeSitter = struct {
         defer self.allocator.free(tasks);
         var wg = std.Thread.WaitGroup{};
         defer wg.wait();
-
         for (tasks, 0..) |*task, i| {
             wg.start();
             task.* = .{ .wg = &wg, .parent = self, .lines = lines, .window_offset = window_offset, .window_lines_offset = window_lines_offset, .window_offset_width = window_offset_width, .window_offset_height = window_offset_height, .window_height = window_height, .highlights = &self.per_thread_highlights[i], .root = root };

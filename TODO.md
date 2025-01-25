@@ -20,15 +20,15 @@
 * [X] All operations (`insert`, `append`, `set` & `delete`) on `FileBuffer` need to update `buffer_line_range_indices` and `buffer_offset_range_indices`
 * [X] Treesitter parsing for lines in buffer, using output to style line segments
 * [X] Thread pool based rendering of each language highlight with main thread rendering un-highlighted text.
-* [ ] Range based delete via visual mode
 * [X] Config loading
 * [X] Configurable colour scheme
-* [ ] Configurable key maps
 * [X] Query tree sitter using language highlights SCM
+* [ ] Range based delete via visual mode
+* [ ] Configurable key maps
 
 ## Refactor
 
 * [X] Optimise language loading to generate switch at compile time
-* [ ] Improve `draw()` call structuring
 * [X] Cache TS queries off heap (performed by a thread pool) and render cached results. Re-cache queries when tree changes.
+* [ ] Improve `draw()` call structuring
 * [ ] Updated cached entries for only section of tree that changes

@@ -6,6 +6,7 @@ const Query = @import("query.zig").Query;
 const Queries = @import("query.zig").Queries;
 const Pool = @import("zap");
 const Config = @import("config.zig").Config;
+const TREE_SITTER_QUERIES_PATH = @import("config.zig").TREE_SITTER_QUERIES_PATH;
 const known_folders = @import("known-folders");
 const json = @import("json");
 const fb = @import("buffer.zig");
@@ -127,6 +128,20 @@ fn loadGrammar(grammar: zts.LanguageGrammar) !*const zts.Language {
     // NOTE: When using `inline for` the compiler doesn't know that every
     //       possible case has been handled requiring an explicit `unreachable`.
     unreachable;
+}
+
+fn loadHighlightQueries(allocator: std.mem.Allocator, grammar: zts.LanguageGrammar) !Queries {
+    const config_dir_path = try known_folders.getPath(allocator, known_folders.KnownFolder.roaming_configuration) orelse return error.NoDotConfigDirectory;
+    defer allocator.free(config_dir_path);
+    const full_path = try std.fmt.allocPrint(allocator, "{s}{s}{s}/highlights.scm", .{ config_dir_path, TREE_SITTER_QUERIES_PATH, @tagName(grammar) });
+    defer allocator.free(full_path);
+    const hl_file = try std.fs.openFileAbsolute(full_path, .{ .mode = .read_only });
+    defer hl_file.close();
+    const hl_queries = try hl_file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
+    defer allocator.free(hl_queries);
+    var queries = Queries.init(allocator, hl_queries);
+    try queries.parseQueries();
+    return queries;
 }
 
 const ThreadHighlights = struct {
@@ -305,18 +320,13 @@ pub const TreeSitter = struct {
         const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
             return null;
         };
-        return try TreeSitter.init(allocator, config, try loadGrammar(grammar));
+        return try TreeSitter.init(allocator, config, try loadGrammar(grammar), grammar);
     }
 
-    pub fn init(allocator: std.mem.Allocator, config: Config, language: *const zts.Language) !TreeSitter {
+    pub fn init(allocator: std.mem.Allocator, config: Config, language: *const zts.Language, grammar: zts.LanguageGrammar) !TreeSitter {
         const parser = try zts.Parser.init();
         try parser.setLanguage(language);
-        const hl_file = try std.fs.openFileAbsolute("/Users/jackkilrain/.config/flow/queries/zig/highlights.scm", .{ .mode = .read_only });
-        defer hl_file.close();
-        const hl_queries = try hl_file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
-        defer allocator.free(hl_queries);
-        var queries = Queries.init(allocator, hl_queries);
-        try queries.parseQueries();
+        var queries = try loadHighlightQueries(allocator, grammar);
         const query_count: usize = @intCast(queries.elems.count());
         const thread_count: usize = @min(query_count, std.Thread.getCpuCount() catch 1);
         const per_thread_highlights = try allocator.alloc(ThreadHighlights, thread_count);

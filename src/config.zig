@@ -12,13 +12,10 @@ pub const THEME_PATH: []const u8 = "/flow/theme.json";
 const MaxFileSize: usize = 1 * 1024 * 1024 * 1024; // 1 GB
 
 fn loadJson(allocator: std.mem.Allocator, comptime path: []const u8, comptime T: type) !std.json.Parsed(T) {
-    const json_path = try known_folders.getPath(allocator, known_folders.KnownFolder.roaming_configuration) orelse return error.NoDotConfigDirectory;
-    defer allocator.free(json_path);
-    const original_length = json_path.len;
-    var full_path = try allocator.alloc(u8, json_path.len + path.len);
+    const config_dir_path = try known_folders.getPath(allocator, known_folders.KnownFolder.roaming_configuration) orelse return error.NoDotConfigDirectory;
+    defer allocator.free(config_dir_path);
+    const full_path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config_dir_path, path });
     defer allocator.free(full_path);
-    @memcpy(full_path[0..json_path.len], json_path);
-    @memcpy(full_path[original_length..], path);
     const file = try std.fs.openFileAbsolute(full_path, .{ .mode = .read_only });
     const file_contents = try file.readToEndAlloc(allocator, MaxFileSize);
     defer allocator.free(file_contents);

@@ -1,9 +1,13 @@
 #/usr/bin/env bash
 
-TRUNC_LOG="${TRUNC_LOG:-false}"
+set -o errexit -o pipefail -o noclobber -o nounset
+
+TRUNC_LOG="${TRUNC_LOG:-true}"
 
 if [ $TRUNC_LOG ]; then
-    rm stderr.log
+    rm stderr.log || true
 fi
 
-zig build && zig-out/bin/Flow test_file.zig 2> stderr.log || true && reset
+zig build
+zig-out/bin/Flow test_file.zig 2> stderr.log || true
+reset

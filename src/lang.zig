@@ -2,6 +2,7 @@ const std = @import("std");
 const zts = @import("zts");
 const vaxis = @import("vaxis");
 const colours = @import("colours.zig");
+const Tag = @import("query.zig").Tag;
 const Query = @import("query.zig").Query;
 const Queries = @import("query.zig").Queries;
 const Pool = @import("zap");
@@ -11,6 +12,8 @@ const known_folders = @import("known-folders");
 const json = @import("json");
 const fb = @import("buffer.zig");
 const Range = fb.Range;
+const ConcurrentArrayList = @import("containers/concurrent_array_list.zig").ConcurrentArrayList;
+const ConcurrentStringHashMap = @import("containers//concurrent_string_hash_map.zig").ConcurrentStringHashMap;
 
 pub const TreeIterator = struct {
     cursor: zts.TreeCursor,
@@ -135,7 +138,16 @@ fn loadHighlightQueries(allocator: std.mem.Allocator, grammar: zts.LanguageGramm
     defer allocator.free(config_dir_path);
     const full_path = try std.fmt.allocPrint(allocator, "{s}{s}{s}/highlights.scm", .{ config_dir_path, TREE_SITTER_QUERIES_PATH, @tagName(grammar) });
     defer allocator.free(full_path);
-    const hl_file = try std.fs.openFileAbsolute(full_path, .{ .mode = .read_only });
+    var hl_file: std.fs.File = undefined;
+    if (std.fs.openFileAbsolute(full_path, .{ .mode = .read_only })) |file| {
+        hl_file = file;
+    } else |err| switch (err) {
+        error.FileNotFound => {
+            std.log.err("Missing queries for language at {s}", .{full_path});
+            return err;
+        },
+        else => return err,
+    }
     defer hl_file.close();
     const hl_queries = try hl_file.readToEndAlloc(allocator, 1024 * 1024 * 1024);
     defer allocator.free(hl_queries);
@@ -171,51 +183,8 @@ const Highlight = struct {
     segment: vaxis.Segment,
     print_options: vaxis.PrintOptions,
 };
-const Highlights = std.ArrayList(Highlight);
-const QueryHighlightsContext = struct {
-    pub fn hash(self: @This(), s: Query) u32 {
-        _ = self;
-        return std.array_hash_map.hashString(s.items);
-    }
-    pub fn eql(self: @This(), a: Query, b: Query, b_index: usize) bool {
-        _ = self;
-        _ = b_index;
-        return std.array_hash_map.eqlString(a.items, b.items);
-    }
-};
-const QueryHighlights = struct {
-    allocator: std.mem.Allocator,
-    rwlock: std.Thread.RwLock,
-    map: std.ArrayHashMap(Query, Highlights, QueryHighlightsContext, true),
-
-    pub fn init(allocator: std.mem.Allocator) @This() {
-        return .{
-            .allocator = allocator,
-            .rwlock = std.Thread.RwLock{},
-            .map = std.ArrayHashMap(Query, Highlights, QueryHighlightsContext, true).init(allocator),
-        };
-    }
-
-    pub fn deinit(self: *@This()) void {
-        var iter = self.map.iterator();
-        while (iter.next()) |entry| {
-            entry.value_ptr.deinit();
-        }
-        self.map.deinit();
-    }
-
-    pub fn put(self: *@This(), query: Query, highlights: Highlights) !void {
-        self.rwlock.lock();
-        defer self.rwlock.unlock();
-        try self.map.put(query, highlights);
-    }
-
-    pub fn get(self: *@This(), query: Query) ?Highlights {
-        self.rwlock.lockShared();
-        defer self.rwlock.unlockShared();
-        return self.map.get(query);
-    }
-};
+const QueryHighlights = ConcurrentStringHashMap(Highlight);
+const LineQueryHighlights = std.ArrayList(QueryHighlights);
 
 const QueryTask = struct {
     task: Pool.Task = .{ .callback = @This().callback },
@@ -257,7 +226,6 @@ const QueryTask = struct {
             cursor.setByteRange(@intCast(self.window_offset.start), @intCast(self.window_offset.end));
             cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(self.window_height), .column = 0 });
             var match: zts.QueryMatch = undefined;
-            var highlights = Highlights.init(self.parent.allocator);
             while (true) {
                 if (!cursor.nextMatch(&match)) {
                     break;
@@ -268,9 +236,10 @@ const QueryTask = struct {
                     const start = node.getStartPoint();
                     const end = node.getEndPoint();
                     var style: vaxis.Style = .{};
+                    var tag: ?Tag = null;
                     if (tags != null and tags.?.items.len > 0) {
-                        const tag = tags.?.getLast();
-                        const theme_highlight = self.parent.config.theme.get(tag.items);
+                        tag = tags.?.getLast();
+                        const theme_highlight = self.parent.config.theme.get(tag.?.items);
                         if (theme_highlight) |hl| {
                             style.fg = hl.colour;
                             style.bold = hl.bold;
@@ -278,12 +247,20 @@ const QueryTask = struct {
                             if (hl.underline) {
                                 style.ul = hl.colour;
                             }
+                            std.log.err("HL ({d},{d}) '{s}' @ {s}", .{ start.column, start.row, self.lines.items[start.row].items[start.column..end.column], tag.?.items });
                         }
                     }
-                    highlights.append(Highlight{
+                    var highlights: QueryHighlights = self.parent.highlights.items[@intCast(start.row)];
+                    highlights.rwlock.lock();
+                    defer highlights.rwlock.unlock();
+                    const existing = highlights.map.get(query_string.items);
+                    if (existing != null and existing.?.segment.style.fg != .default) {
+                        std.log.err("Skip as null or non-default style", .{});
+                        continue;
+                    }
+                    std.log.err("Putting new style", .{});
+                    highlights.map.put(query_string.items, .{
                         .child_options = .{
-                            .x_off = start.column - self.window_lines_offset.start,
-                            .y_off = start.row,
                             .width = .{ .limit = end.column - start.column },
                             .height = .{ .limit = @max(1, end.row - start.row) },
                         },
@@ -291,16 +268,16 @@ const QueryTask = struct {
                             .text = self.lines.items[start.row].items[start.column..end.column],
                             .style = style,
                         },
-                        .print_options = .{},
+                        .print_options = .{
+                            .row_offset = start.row,
+                            .col_offset = start.column,
+                        },
                     }) catch {
-                        std.log.err("Failed to append highlight capture {d} for query {s}", .{ j, query_string.items });
+                        std.log.err("Unable to append highlight. [Line: {d}] [Column: {d}] [Query: {s}] [Capture: {d}]", .{ start.row, start.column, query_string.items, j });
                     };
                 }
                 cursor.removeMatch(0);
             }
-            self.parent.highlights.put(query_string, highlights) catch {
-                std.log.err("Failed to store {d} highlights for query: {s}", .{ highlights.items.len, query_string.items });
-            };
         }
     }
 };
@@ -313,7 +290,7 @@ pub const TreeSitter = struct {
     tree: ?*zts.Tree,
     queries: Queries,
     per_thread_highlights: []ThreadHighlights,
-    highlights: QueryHighlights,
+    highlights: LineQueryHighlights,
     render_thread_pool: Pool,
 
     pub fn initFromFileExtension(allocator: std.mem.Allocator, config: Config, extension: []const u8) !?TreeSitter {
@@ -339,7 +316,7 @@ pub const TreeSitter = struct {
             .tree = null,
             .queries = queries,
             .per_thread_highlights = per_thread_highlights,
-            .highlights = QueryHighlights.init(allocator),
+            .highlights = LineQueryHighlights.init(allocator),
             .render_thread_pool = Pool.init(@max(1, std.Thread.getCpuCount() catch 1)),
         };
     }
@@ -349,13 +326,22 @@ pub const TreeSitter = struct {
         self.queries.deinit();
         self.allocator.free(self.per_thread_highlights);
         self.render_thread_pool.deinit();
+        for (0..self.highlights.items.len) |i| {
+            self.highlights.items[i].deinit();
+        }
         self.highlights.deinit();
     }
 
     pub fn parseBuffer(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8)), window_offset: Range, window_lines_offset: Range, window_offset_width: usize, window_offset_height: usize, window_height: usize) !void {
         self.tree = try self.parser.parseString(self.tree, buffer);
+        for (0..self.highlights.items.len) |i| {
+            self.highlights.items[i].deinit();
+        }
         self.highlights.deinit();
-        self.highlights = QueryHighlights.init(self.allocator);
+        self.highlights = LineQueryHighlights.init(self.allocator);
+        for (0..lines.items.len) |_| {
+            try self.highlights.append(QueryHighlights.init(self.allocator));
+        }
         const root = self.tree.?.rootNodeWithOffset(@intCast(window_offset.start), .{
             .row = @intCast(window_offset_width),
             .column = @intCast(window_offset_height),
@@ -371,23 +357,28 @@ pub const TreeSitter = struct {
         }
     }
 
-    pub fn drawBuffer(self: *@This(), window: vaxis.Window) !void {
+    pub fn drawBuffer(self: *@This(), window: vaxis.Window, window_lines_offset: Range) !void {
         // NOTE: If necessary at some stage this can be parallelised, but I doubt
         //       that it will need to be. I also feel like I'm going to look at this
         //       comment in future and say "Wow.. that was dumb".. but yeah.
-        const keys = self.queries.elems.keys();
-        // FIXME: Change QueryHighlights to store a list of highlights for
-        //        a row index so that moving windows can just index without
-        //        needing to filter through all the highlights every time
-        //        a render call happens.
-        for (keys) |key| {
-            const query_highlights = self.highlights.get(key) orelse continue;
-            for (query_highlights.items) |highlight| {
-                // TODO: Avoid creating a child by setting row/column offsets
-                //       in print_options to print to screen correctly.
-                const child = window.child(highlight.child_options);
-                _ = try child.printSegment(highlight.segment, highlight.print_options);
+        for (window_lines_offset.start..window_lines_offset.end) |i| {
+            var hls: *ConcurrentStringHashMap(Highlight) = &self.highlights.items[i];
+            var iter = hls.iterator();
+            while (iter.next()) |entry| {
+                const hl = entry.value_ptr;
+                _ = try window.printSegment(hl.segment, hl.print_options);
             }
+            // hls.rwlock.lockShared();
+            // defer hls.rwlock.unlockShared();
+            // for (hls.array_list.items) |hl| {
+            //     if (hl.segment.style.fg != .default) {
+            //         std.log.err("[RENDER] ({d},{d}) '{s}' ({d},{d},{d})", .{ hl.print_options.col_offset, hl.print_options.row_offset, hl.segment.text, hl.segment.style.fg.rgb[0], hl.segment.style.fg.rgb[0], hl.segment.style.fg.rgb[0] });
+            //     } else {
+            //         std.log.err("[RENDER] ({d},{d}) '{s}' (DEFAULT)", .{ hl.print_options.col_offset, hl.print_options.row_offset, hl.segment.text });
+            //     }
+            //     _ = try window.printSegment(hl.segment, hl.print_options);
+            // }
         }
+        // return error.DebugError;
     }
 };

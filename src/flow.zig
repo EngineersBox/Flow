@@ -332,7 +332,11 @@ pub const Flow = struct {
                 // if (self.tree_sitter) |tree| {
                 //     const edit = zts.InputEdit{
                 //         .start_point = .{ .column = self.vx.screen.cursor_col, .row = self.buffer.buffer_line_range_indicies.?.start + self.vx.screen.cursor_row },
-                //         .start_byte = '\n',
+                //         .start_byte = self.cursor_offset,
+                //         .old_end_point = .{ .column = self.vx.screen.cursor_col + 1, .row = self.buffer.buffer_line_range_indicies.?.start - self.vx.screen.cursor_row },
+                //         .old_end_byte = self.cursor_offset + 1,
+                //         .new_end_byte = self.cursor_offset,
+                //         .new_end_point = .{ .column = self.vx.screen.cursor_col, .row = self.buffer.buffer_line_range_indicies.?.start + self.vx.screen.cursor_row },
                 //     };
                 //     tree.tree.?.edit(&edit);
                 // }
@@ -507,7 +511,7 @@ pub const Flow = struct {
         //      makes it a constant value and not variable (which is
         //      needed here).
         if (self.tree_sitter != null) {
-            try self.tree_sitter.?.drawBuffer(window);
+            try self.tree_sitter.?.drawBuffer(window, self.buffer.buffer_line_range_indicies.?);
         } else {
             const lines = self.window_lines.items[self.buffer.buffer_line_range_indicies.?.start..self.buffer.buffer_line_range_indicies.?.end];
             for (lines, 0..) |line, y_offset| {

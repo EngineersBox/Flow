@@ -183,7 +183,8 @@ const Highlight = struct {
     segment: vaxis.Segment,
     print_options: vaxis.PrintOptions,
 };
-const QueryHighlights = ConcurrentStringHashMap(Highlight);
+const Highlights = ConcurrentArrayList(Highlight);
+const QueryHighlights = ConcurrentStringHashMap(*Highlights);
 const LineQueryHighlights = std.ArrayList(QueryHighlights);
 
 const QueryTask = struct {
@@ -250,16 +251,24 @@ const QueryTask = struct {
                             std.log.err("HL ({d},{d}) '{s}' @ {s}", .{ start.column, start.row, self.lines.items[start.row].items[start.column..end.column], tag.?.items });
                         }
                     }
-                    var highlights: QueryHighlights = self.parent.highlights.items[@intCast(start.row)];
-                    highlights.rwlock.lock();
-                    defer highlights.rwlock.unlock();
-                    const existing = highlights.map.get(query_string.items);
-                    if (existing != null and existing.?.segment.style.fg != .default) {
-                        std.log.err("Skip as null or non-default style", .{});
-                        continue;
+                    var query_highlights: *QueryHighlights = &self.parent.highlights.items[@intCast(start.row)];
+                    query_highlights.rwlock.lock();
+                    defer query_highlights.rwlock.unlock();
+                    var highlights = query_highlights.map.get(query_string.items);
+                    if (highlights == null) {
+                        std.log.err("Adding new highlights mapping", .{});
+                        highlights = self.parent.allocator.create(Highlights) catch {
+                            std.log.err("Failed to allocate highlights", .{});
+                            continue;
+                        };
+                        highlights.?.* = Highlights.init(self.parent.allocator);
+                        query_highlights.map.put(query_string.items, highlights.?) catch {
+                            std.log.err("Unable to create new highlights mapping for query. [Line: {d}] [Column: {d}] [Query: {s}] [Cature: {d}]", .{ start.row, start.column, query_string.items, j });
+                            continue;
+                        };
                     }
-                    std.log.err("Putting new style", .{});
-                    highlights.map.put(query_string.items, .{
+                    std.log.err("Appending highlight: '{s}' for query '{s}'", .{ self.lines.items[start.row].items[start.column..end.column], query_string.items });
+                    highlights.?.append(.{
                         .child_options = .{
                             .width = .{ .limit = end.column - start.column },
                             .height = .{ .limit = @max(1, end.row - start.row) },
@@ -334,8 +343,13 @@ pub const TreeSitter = struct {
 
     pub fn parseBuffer(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8)), window_offset: Range, window_lines_offset: Range, window_offset_width: usize, window_offset_height: usize, window_height: usize) !void {
         self.tree = try self.parser.parseString(self.tree, buffer);
-        for (0..self.highlights.items.len) |i| {
-            self.highlights.items[i].deinit();
+        for (self.highlights.items) |*hls| {
+            var iter = hls.iterator();
+            while (iter.next()) |entry| {
+                entry.value_ptr.*.deinit();
+                self.allocator.destroy(entry.value_ptr.*);
+            }
+            hls.deinit();
         }
         self.highlights.deinit();
         self.highlights = LineQueryHighlights.init(self.allocator);
@@ -362,11 +376,16 @@ pub const TreeSitter = struct {
         //       that it will need to be. I also feel like I'm going to look at this
         //       comment in future and say "Wow.. that was dumb".. but yeah.
         for (window_lines_offset.start..window_lines_offset.end) |i| {
-            var hls: *ConcurrentStringHashMap(Highlight) = &self.highlights.items[i];
-            var iter = hls.iterator();
+            var query_highlights: QueryHighlights = self.highlights.items[i];
+            var iter = query_highlights.iterator();
             while (iter.next()) |entry| {
-                const hl = entry.value_ptr;
-                _ = try window.printSegment(hl.segment, hl.print_options);
+                var highlights: *Highlights = entry.value_ptr.*;
+                // std.log.err("[RENDER] Line: {d} Query: {s} Count: {d}", .{ i, entry.key_ptr.*, highlights.count() });
+                highlights.rwlock.lockShared();
+                for (highlights.array_list.items) |hl| {
+                    _ = try window.printSegment(hl.segment, hl.print_options);
+                }
+                highlights.rwlock.unlockShared();
             }
             // hls.rwlock.lockShared();
             // defer hls.rwlock.unlockShared();

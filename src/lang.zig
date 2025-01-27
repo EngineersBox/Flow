@@ -3,6 +3,7 @@ const zts = @import("zts");
 const vaxis = @import("vaxis");
 const colours = @import("colours.zig");
 const Tag = @import("query.zig").Tag;
+const Tags = @import("query.zig").Tags;
 const Query = @import("query.zig").Query;
 const Queries = @import("query.zig").Queries;
 const Pool = @import("zap");
@@ -207,7 +208,7 @@ const QueryTask = struct {
         const idx_end = idx_start + self.highlights.count;
         for (idx_start..idx_end) |i| {
             const query_string = self.parent.queries.elems.keys()[i];
-            const tags = self.parent.queries.elems.get(query_string);
+            var tags = self.parent.queries.elems.get(query_string);
             var query = zts.Query.init(self.parent.language, query_string.items) catch {
                 std.log.err("Failed to init query", .{});
                 continue;
@@ -234,60 +235,56 @@ const QueryTask = struct {
                 const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
                 for (0..match.capture_count) |j| {
                     const node = captures[j].node;
-                    const start = node.getStartPoint();
-                    const end = node.getEndPoint();
-                    var style: vaxis.Style = .{};
-                    var tag: ?Tag = null;
-                    if (tags != null and tags.?.items.len > 0) {
-                        tag = tags.?.getLast();
-                        const theme_highlight = self.parent.config.theme.get(tag.?.items);
-                        if (theme_highlight) |hl| {
-                            style.fg = hl.colour;
-                            style.bold = hl.bold;
-                            style.italic = hl.italic;
-                            if (hl.underline) {
-                                style.ul = hl.colour;
-                            }
-                            std.log.err("HL ({d},{d}) '{s}' @ {s}", .{ start.column, start.row, self.lines.items[start.row].items[start.column..end.column], tag.?.items });
-                        }
-                    }
-                    var query_highlights: *QueryHighlights = &self.parent.highlights.items[@intCast(start.row)];
-                    query_highlights.rwlock.lock();
-                    defer query_highlights.rwlock.unlock();
-                    var highlights = query_highlights.map.get(query_string.items);
-                    if (highlights == null) {
-                        std.log.err("Adding new highlights mapping", .{});
-                        highlights = self.parent.allocator.create(Highlights) catch {
-                            std.log.err("Failed to allocate highlights", .{});
-                            continue;
-                        };
-                        highlights.?.* = Highlights.init(self.parent.allocator);
-                        query_highlights.map.put(query_string.items, highlights.?) catch {
-                            std.log.err("Unable to create new highlights mapping for query. [Line: {d}] [Column: {d}] [Query: {s}] [Cature: {d}]", .{ start.row, start.column, query_string.items, j });
-                            continue;
-                        };
-                    }
-                    std.log.err("Appending highlight: '{s}' for query '{s}'", .{ self.lines.items[start.row].items[start.column..end.column], query_string.items });
-                    highlights.?.append(.{
-                        .child_options = .{
-                            .width = .{ .limit = end.column - start.column },
-                            .height = .{ .limit = @max(1, end.row - start.row) },
-                        },
-                        .segment = .{
-                            .text = self.lines.items[start.row].items[start.column..end.column],
-                            .style = style,
-                        },
-                        .print_options = .{
-                            .row_offset = start.row,
-                            .col_offset = start.column,
-                        },
-                    }) catch {
-                        std.log.err("Unable to append highlight. [Line: {d}] [Column: {d}] [Query: {s}] [Capture: {d}]", .{ start.row, start.column, query_string.items, j });
+                    self.storeHighlight(query_string.items, &tags, node) catch |err| {
+                        std.log.err("Failed to store highlight: {s} :: [Column: {d}] [Line: {d}] [Query: {s}] [Capture: {d}]", .{ @errorName(err), node.getStartPoint().column, node.getStartPoint().row, query_string.items, j });
                     };
                 }
                 cursor.removeMatch(0);
             }
         }
+    }
+
+    fn storeHighlight(self: *@This(), query_string: []const u8, tags: *?Tags, node: zts.Node) !void {
+        const start = node.getStartPoint();
+        const end = node.getEndPoint();
+        var style: vaxis.Style = .{};
+        var tag: ?Tag = null;
+        if (tags.* != null and tags.*.?.items.len > 0) {
+            tag = tags.*.?.getLast();
+            const theme_highlight = self.parent.config.theme.get(tag.?.items);
+            if (theme_highlight) |hl| {
+                style.fg = hl.colour;
+                style.bold = hl.bold;
+                style.italic = hl.italic;
+                if (hl.underline) {
+                    style.ul = hl.colour;
+                }
+            }
+        }
+        var query_highlights: *QueryHighlights = &self.parent.highlights.items[@intCast(start.row)];
+        query_highlights.rwlock.lock();
+        defer query_highlights.rwlock.unlock();
+        var highlights = query_highlights.map.get(query_string);
+        if (highlights == null) {
+            std.log.err("Adding new highlights mapping", .{});
+            highlights = try self.parent.allocator.create(Highlights);
+            highlights.?.* = Highlights.init(self.parent.allocator);
+            try query_highlights.map.put(query_string, highlights.?);
+        }
+        try highlights.?.append(.{
+            .child_options = .{
+                .width = .{ .limit = end.column - start.column },
+                .height = .{ .limit = @max(1, end.row - start.row) },
+            },
+            .segment = .{
+                .text = self.lines.items[start.row].items[start.column..end.column],
+                .style = style,
+            },
+            .print_options = .{
+                .row_offset = start.row,
+                .col_offset = start.column,
+            },
+        });
     }
 };
 

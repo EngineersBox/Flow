@@ -338,6 +338,14 @@ pub const TreeSitter = struct {
         for (0..self.highlights.items.len) |i| {
             self.highlights.items[i].deinit();
         }
+        for (self.highlights.items) |*hls| {
+            var iter = hls.iterator();
+            while (iter.next()) |entry| {
+                entry.value_ptr.*.deinit();
+                self.allocator.destroy(entry.value_ptr.*);
+            }
+            hls.deinit();
+        }
         self.highlights.deinit();
     }
 
@@ -380,23 +388,12 @@ pub const TreeSitter = struct {
             var iter = query_highlights.iterator();
             while (iter.next()) |entry| {
                 var highlights: *Highlights = entry.value_ptr.*;
-                // std.log.err("[RENDER] Line: {d} Query: {s} Count: {d}", .{ i, entry.key_ptr.*, highlights.count() });
                 highlights.rwlock.lockShared();
                 for (highlights.array_list.items) |hl| {
                     _ = try window.printSegment(hl.segment, hl.print_options);
                 }
                 highlights.rwlock.unlockShared();
             }
-            // hls.rwlock.lockShared();
-            // defer hls.rwlock.unlockShared();
-            // for (hls.array_list.items) |hl| {
-            //     if (hl.segment.style.fg != .default) {
-            //         std.log.err("[RENDER] ({d},{d}) '{s}' ({d},{d},{d})", .{ hl.print_options.col_offset, hl.print_options.row_offset, hl.segment.text, hl.segment.style.fg.rgb[0], hl.segment.style.fg.rgb[0], hl.segment.style.fg.rgb[0] });
-            //     } else {
-            //         std.log.err("[RENDER] ({d},{d}) '{s}' (DEFAULT)", .{ hl.print_options.col_offset, hl.print_options.row_offset, hl.segment.text });
-            //     }
-            //     _ = try window.printSegment(hl.segment, hl.print_options);
-            // }
         }
         // return error.DebugError;
     }

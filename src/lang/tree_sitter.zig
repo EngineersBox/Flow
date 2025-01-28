@@ -1,20 +1,21 @@
 const std = @import("std");
 const zts = @import("zts");
 const vaxis = @import("vaxis");
-const colours = @import("colours.zig");
+const json = @import("json");
+const Pool = @import("zap");
+const known_folders = @import("known-folders");
+
+const colours = @import("../colours.zig");
 const Tag = @import("query.zig").Tag;
 const Tags = @import("query.zig").Tags;
 const Query = @import("query.zig").Query;
 const Queries = @import("query.zig").Queries;
-const Pool = @import("zap");
-const Config = @import("config.zig").Config;
-const TREE_SITTER_QUERIES_PATH = @import("config.zig").TREE_SITTER_QUERIES_PATH;
-const known_folders = @import("known-folders");
-const json = @import("json");
-const fb = @import("buffer.zig");
-const Range = fb.Range;
-const ConcurrentArrayList = @import("containers/concurrent_array_list.zig").ConcurrentArrayList;
-const ConcurrentStringHashMap = @import("containers//concurrent_string_hash_map.zig").ConcurrentStringHashMap;
+const Config = @import("../config.zig").Config;
+const TREE_SITTER_QUERIES_PATH = @import("../config.zig").TREE_SITTER_QUERIES_PATH;
+const _ranges = @import("../window/range.zig");
+const Range = _ranges.Range;
+const ConcurrentArrayList = @import("../containers/concurrent_array_list.zig").ConcurrentArrayList;
+const ConcurrentStringHashMap = @import("../containers//concurrent_string_hash_map.zig").ConcurrentStringHashMap;
 
 pub const TreeIterator = struct {
     cursor: zts.TreeCursor,
@@ -193,11 +194,7 @@ const QueryTask = struct {
     wg: *std.Thread.WaitGroup,
     parent: *TreeSitter,
     lines: *std.ArrayList(std.ArrayList(u8)),
-    window_offset: Range,
-    window_lines_offset: Range,
-    window_offset_width: usize,
-    window_offset_height: usize,
-    window_height: usize,
+    buffer_size: usize,
     highlights: *ThreadHighlights,
     root: zts.Node,
 
@@ -225,8 +222,11 @@ const QueryTask = struct {
             };
             defer cursor.deinit();
             cursor.exec(query, self.root);
-            cursor.setByteRange(@intCast(self.window_offset.start), @intCast(self.window_offset.end));
-            cursor.setPointRange(.{ .row = 0, .column = 0 }, .{ .row = @intCast(self.window_height), .column = 0 });
+            cursor.setByteRange(0, @intCast(self.buffer_size));
+            cursor.setPointRange(
+                .{ .row = 0, .column = 0 },
+                .{ .row = @intCast(self.lines.items.len), .column = 0 },
+            );
             var match: zts.QueryMatch = undefined;
             while (true) {
                 if (!cursor.nextMatch(&match)) {
@@ -236,7 +236,16 @@ const QueryTask = struct {
                 for (0..match.capture_count) |j| {
                     const node = captures[j].node;
                     self.storeHighlight(query_string.items, &tags, node) catch |err| {
-                        std.log.err("Failed to store highlight: {s} :: [Column: {d}] [Line: {d}] [Query: {s}] [Capture: {d}]", .{ @errorName(err), node.getStartPoint().column, node.getStartPoint().row, query_string.items, j });
+                        std.log.err(
+                            "Failed to store highlight: {s} :: [Column: {d}] [Line: {d}] [Query: {s}] [Capture: {d}]",
+                            .{
+                                @errorName(err),
+                                node.getStartPoint().column,
+                                node.getStartPoint().row,
+                                query_string.items,
+                                j,
+                            },
+                        );
                     };
                 }
                 cursor.removeMatch(0);
@@ -346,7 +355,7 @@ pub const TreeSitter = struct {
         self.highlights.deinit();
     }
 
-    pub fn parseBuffer(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8)), window_offset: Range, window_lines_offset: Range, window_offset_width: usize, window_offset_height: usize, window_height: usize) !void {
+    pub fn parseBuffer(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8))) !void {
         self.tree = try self.parser.parseString(self.tree, buffer);
         for (self.highlights.items) |*hls| {
             var iter = hls.iterator();
@@ -361,9 +370,9 @@ pub const TreeSitter = struct {
         for (0..lines.items.len) |_| {
             try self.highlights.append(QueryHighlights.init(self.allocator));
         }
-        const root = self.tree.?.rootNodeWithOffset(@intCast(window_offset.start), .{
-            .row = @intCast(window_offset_width),
-            .column = @intCast(window_offset_height),
+        const root = self.tree.?.rootNodeWithOffset(0, .{
+            .row = 0,
+            .column = 0,
         });
         const tasks: []QueryTask = try self.allocator.alloc(QueryTask, self.per_thread_highlights.len);
         defer self.allocator.free(tasks);
@@ -371,7 +380,14 @@ pub const TreeSitter = struct {
         defer wg.wait();
         for (tasks, 0..) |*task, i| {
             wg.start();
-            task.* = .{ .wg = &wg, .parent = self, .lines = lines, .window_offset = window_offset, .window_lines_offset = window_lines_offset, .window_offset_width = window_offset_width, .window_offset_height = window_offset_height, .window_height = window_height, .highlights = &self.per_thread_highlights[i], .root = root };
+            task.* = .{
+                .wg = &wg,
+                .parent = self,
+                .lines = lines,
+                .buffer_size = buffer.len,
+                .highlights = &self.per_thread_highlights[i],
+                .root = root,
+            };
             Pool.schedule(&self.render_thread_pool, &task.task);
         }
     }
@@ -392,6 +408,5 @@ pub const TreeSitter = struct {
                 highlights.rwlock.unlockShared();
             }
         }
-        // return error.DebugError;
     }
 };

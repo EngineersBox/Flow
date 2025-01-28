@@ -11,6 +11,7 @@ const BufferIterator = b.BufferIterator;
 const Line = b.Line;
 const _ranges = @import("window/range.zig");
 const Range = _ranges.Range;
+const Position = _ranges.Position;
 const WindowRanges = _ranges.WindowRanges;
 const Window = @import("window/window.zig").Window;
 const TreeSitter = @import("lang/tree_sitter.zig").TreeSitter;
@@ -276,34 +277,14 @@ pub const Flow = struct {
         self.adjustCursorOffset(prev_row, prev_col);
     }
 
-    inline fn editForCursorPos(self: *@This()) zts.InputEdit {
-        return zts.InputEdit{
-            .start_point = .{
-                .column = @intCast(self.vx.screen.cursor_col),
-                .row = @intCast(self.active_window.?.ranges.?.lines.start + self.vx.screen.cursor_row),
-            },
-            .start_byte = @intCast(self.cursor_offset),
-            .old_end_point = .{
-                .column = @intCast(self.vx.screen.cursor_col + 1),
-                .row = @intCast(self.active_window.?.ranges.?.lines.start - self.vx.screen.cursor_row),
-            },
-            .old_end_byte = @intCast(self.cursor_offset + 1),
-            .new_end_byte = @intCast(self.cursor_offset),
-            .new_end_point = .{
-                .column = @intCast(self.vx.screen.cursor_col),
-                .row = @intCast(self.active_window.?.ranges.?.lines.start + self.vx.screen.cursor_row),
-            },
-        };
-    }
-
     fn handleModeInsert(self: *@This(), key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.enter => {
                 try self.active_window.?.buffer.?.insert(self.cursor_offset, "\n", &self.active_window.?.ranges.?);
-                if (self.active_window.?.buffer.?.tree_sitter) |*ts| {
-                    const edit = self.editForCursorPos();
-                    ts.tree.?.edit(&edit);
-                }
+                // if (self.active_window.?.buffer.?.tree_sitter) |*ts| {
+                //     const edit = self.editForCursorPos();
+                //     ts.tree.?.edit(&edit);
+                // }
                 self.buffer.clearLines();
                 _ = try self.buffer.cacheLines();
                 // Move cursor to start of next row
@@ -331,7 +312,23 @@ pub const Flow = struct {
                 }
                 // Forward delete
                 if (self.active_window.?.buffer.?.tree_sitter) |*ts| {
-                    const edit = self.editForCursorPos();
+                    const edit = zts.InputEdit{
+                        .start_point = .{
+                            .column = @intCast(self.vx.screen.cursor_col),
+                            .row = @intCast(self.active_window.?.ranges.?.lines.start + self.vx.screen.cursor_row),
+                        },
+                        .start_byte = @intCast(self.cursor_offset),
+                        .old_end_point = .{
+                            .column = @intCast(self.vx.screen.cursor_col + 1),
+                            .row = @intCast(self.active_window.?.ranges.?.lines.start - self.vx.screen.cursor_row),
+                        },
+                        .old_end_byte = @intCast(self.cursor_offset + 1),
+                        .new_end_byte = @intCast(self.cursor_offset),
+                        .new_end_point = .{
+                            .column = @intCast(self.vx.screen.cursor_col),
+                            .row = @intCast(self.active_window.?.ranges.?.lines.start + self.vx.screen.cursor_row),
+                        },
+                    };
                     ts.tree.?.edit(&edit);
                 }
                 try self.active_window.?.buffer.?.delete(self.cursor_offset, 1, &self.active_window.?.ranges.?);
@@ -357,9 +354,17 @@ pub const Flow = struct {
                     return;
                 }
                 // Backward delete
+                const previous_cursor: Position = .{
+                    .col = self.vx.screen.cursor_col,
+                    .line = self.vx.screen.cursor_row,
+                };
                 try self.active_window.?.buffer.?.delete(self.cursor_offset - 1, 1, &self.active_window.?.ranges.?);
                 const current_cursor_col = self.vx.screen.cursor_col;
                 try self.shiftCursorCol(-1);
+                const new_cursor: Position = .{
+                    .col = self.vx.screen.cursor_col,
+                    .line = self.vx.screen.cursor_row,
+                };
                 if (current_cursor_col > 0) {
                     const line: *Line = self.getCurrentLine();
                     _ = line.orderedRemove(current_cursor_col - 1);
@@ -384,8 +389,39 @@ pub const Flow = struct {
                 // position calculations to correctly remove the character
                 // at the start of end of a line
                 if (self.active_window.?.buffer.?.tree_sitter) |*ts| {
-                    const edit = self.editForCursorPos();
+                    const edit = zts.InputEdit{
+                        .start_point = .{
+                            .column = @intCast(new_cursor.col),
+                            .row = @intCast(new_cursor.line),
+                        },
+                        .start_byte = @intCast(self.cursor_offset),
+                        .old_end_point = .{
+                            .column = @intCast(previous_cursor.col),
+                            .row = @intCast(previous_cursor.line),
+                        },
+                        .old_end_byte = @as(u32, @intCast(self.cursor_offset)) + 1,
+                        .new_end_point = .{
+                            .column = @intCast(new_cursor.col),
+                            .row = @intCast(new_cursor.line),
+                        },
+                        .new_end_byte = @intCast(self.cursor_offset),
+                    };
                     ts.tree.?.edit(&edit);
+                    var offset_range: Range = .{
+                        .start = self.cursor_offset,
+                        .end = self.cursor_offset,
+                        .max_diff = null,
+                    };
+                    while (offset_range.start > 0 and self.active_window.?.buffer.?.file_buffer[offset_range.start] != '\n') : (offset_range.start -= 1) {}
+                    while (offset_range.end < self.active_window.?.buffer.?.file_buffer.len - 1 and self.active_window.?.buffer.?.file_buffer[offset_range.end] != '\n') : (offset_range.end += 1) {}
+                    try self.active_window.?.buffer.?.reprocessRange(
+                        offset_range,
+                        .{
+                            .start = @min(new_cursor.line, previous_cursor.line),
+                            .end = @max(new_cursor.line, previous_cursor.line),
+                            .max_diff = null,
+                        },
+                    );
                 }
             },
             vaxis.Key.left => {

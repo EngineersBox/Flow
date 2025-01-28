@@ -392,6 +392,39 @@ pub const TreeSitter = struct {
         }
     }
 
+    pub fn reprocessRange(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8)), range: Range) !void {
+        for (range.start..range.end) |i| {
+            var hls = &self.highlights.items[i];
+            var iter = hls.iterator();
+            while (iter.next()) |entry| {
+                entry.value_ptr.*.deinit();
+                self.allocator.destroy(entry.value_ptr.*);
+            }
+            hls.deinit();
+            hls.* = QueryHighlights.init(self.allocator);
+        }
+        const root = self.tree.?.rootNodeWithOffset(0, .{
+            .row = 0,
+            .column = 0,
+        });
+        const tasks: []QueryTask = try self.allocator.alloc(QueryTask, self.per_thread_highlights.len);
+        defer self.allocator.free(tasks);
+        var wg = std.Thread.WaitGroup{};
+        defer wg.wait();
+        for (tasks, 0..) |*task, i| {
+            wg.start();
+            task.* = .{
+                .wg = &wg,
+                .parent = self,
+                .lines = lines,
+                .buffer_size = buffer.len,
+                .highlights = &self.per_thread_highlights[i],
+                .root = root,
+            };
+            Pool.schedule(&self.render_thread_pool, &task.task);
+        }
+    }
+
     pub fn drawBuffer(self: *@This(), window: vaxis.Window, window_lines_offset: Range) !void {
         // NOTE: If necessary at some stage this can be parallelised, but I doubt
         //       that it will need to be. I also feel like I'm going to look at this

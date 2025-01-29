@@ -30,6 +30,6 @@
 
 * [X] Optimise language loading to generate switch at compile time
 * [X] Cache TS queries off heap (performed by a thread pool) and render cached results. Re-cache queries when tree changes.
-* [ ] Improve `draw()` call structuring
 * [X] Updated cached entries for only section of tree that changes
+* [ ] Improve `draw()` call structuring
 * [ ] Updates should be pushed to a thread pool via queues and `@atomicRmw` done on a single background thread

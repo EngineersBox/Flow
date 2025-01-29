@@ -66,5 +66,11 @@ pub fn ConcurrentArrayList(comptime T: type) type {
             defer self.rwlock.unlock();
             try self.array_list.append(value);
         }
+
+        pub fn popOrNull(self: *@This()) ?T {
+            self.rwlock.lock();
+            defer self.rwlock.unlock();
+            return self.array_list.popOrNull();
+        }
     };
 }

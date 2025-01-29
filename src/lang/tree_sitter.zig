@@ -187,26 +187,77 @@ const Highlight = struct {
 };
 const Highlights = ConcurrentArrayList(Highlight);
 const QueryHighlights = ConcurrentStringHashMap(*Highlights);
-const LineQueryHighlights = std.ArrayList(QueryHighlights);
+const LineQueryHighlights = std.ArrayList(*QueryHighlights);
+
+const HighlightsUpdateTask = struct {
+    task: Pool.Task = .{ .callback = @This().callback },
+    wg: *std.Thread.WaitGroup,
+    allocator: std.mem.Allocator,
+    old_highlights: *LineQueryHighlights,
+    new_highlights: *LineQueryHighlights,
+    line_range: Range,
+    tasks: []QueryTask,
+    done: bool,
+
+    fn callback(task: *Pool.Task) void {
+        const self: *@This() = @alignCast(@fieldParentPtr("task", task));
+        std.log.err("Awaiting QueryTasks completion", .{});
+        self.wg.wait();
+        std.log.err("Modifying range: {d}-{d}", .{ self.line_range.start, self.line_range.end });
+        for (self.line_range.start..self.line_range.end + 1) |i| {
+            std.log.err("BEFORE {d}  [Old: {d}] [New: {d}]", .{
+                i,
+                @intFromPtr(self.old_highlights.items[i]),
+                @intFromPtr(self.new_highlights.items[i]),
+            });
+            const old = @atomicRmw(
+                *QueryHighlights,
+                &self.old_highlights.items[i],
+                std.builtin.AtomicRmwOp.Xchg,
+                self.new_highlights.items[i],
+                std.builtin.AtomicOrder.acq_rel,
+            );
+            std.log.err("AFTER {d} [Old: {d}] [New: {d}]", .{
+                i,
+                @intFromPtr(self.old_highlights.items[i]),
+                @intFromPtr(self.new_highlights.items[i]),
+            });
+            defer old.deinit();
+            var iter = old.iterator();
+            while (iter.next()) |entry| {
+                entry.value_ptr.*.*.deinit();
+            }
+        }
+        self.new_highlights.deinit();
+        self.allocator.destroy(self.new_highlights);
+        self.allocator.free(self.tasks);
+        std.log.err("Finished sync", .{});
+        self.done = true;
+    }
+};
 
 const QueryTask = struct {
     task: Pool.Task = .{ .callback = @This().callback },
     wg: *std.Thread.WaitGroup,
-    parent: *TreeSitter,
+    allocator: std.mem.Allocator,
+    queries: *const Queries,
+    language: *const zts.Language,
+    config: *const Config,
+    highlights: *LineQueryHighlights,
+    highlight_indices: *ThreadHighlights,
     lines: *std.ArrayList(std.ArrayList(u8)),
     buffer_size: usize,
-    highlights: *ThreadHighlights,
     root: zts.Node,
 
     fn callback(task: *Pool.Task) void {
         const self: *@This() = @alignCast(@fieldParentPtr("task", task));
         defer self.wg.finish();
-        const idx_start = self.highlights.index;
-        const idx_end = idx_start + self.highlights.count;
+        const idx_start = self.highlight_indices.index;
+        const idx_end = idx_start + self.highlight_indices.count;
         for (idx_start..idx_end) |i| {
-            const query_string = self.parent.queries.elems.keys()[i];
-            var tags = self.parent.queries.elems.get(query_string);
-            var query = zts.Query.init(self.parent.language, query_string.items) catch {
+            const query_string = self.queries.elems.keys()[i];
+            var tags = self.queries.elems.get(query_string);
+            var query = zts.Query.init(self.language, query_string.items) catch {
                 std.log.err("Failed to init query", .{});
                 continue;
             };
@@ -260,7 +311,7 @@ const QueryTask = struct {
         var tag: ?Tag = null;
         if (tags.* != null and tags.*.?.items.len > 0) {
             tag = tags.*.?.getLast();
-            const theme_highlight = self.parent.config.theme.get(tag.?.items);
+            const theme_highlight = self.config.theme.get(tag.?.items);
             if (theme_highlight) |hl| {
                 style.fg = hl.colour;
                 style.bold = hl.bold;
@@ -270,14 +321,13 @@ const QueryTask = struct {
                 }
             }
         }
-        var query_highlights: *QueryHighlights = &self.parent.highlights.items[@intCast(start.row)];
+        var query_highlights: *QueryHighlights = self.highlights.items[@intCast(start.row)];
         query_highlights.rwlock.lock();
         defer query_highlights.rwlock.unlock();
         var highlights = query_highlights.map.get(query_string);
         if (highlights == null) {
-            std.log.err("Adding new highlights mapping", .{});
-            highlights = try self.parent.allocator.create(Highlights);
-            highlights.?.* = Highlights.init(self.parent.allocator);
+            highlights = try self.allocator.create(Highlights);
+            highlights.?.* = Highlights.init(self.allocator);
             try query_highlights.map.put(query_string, highlights.?);
         }
         try highlights.?.append(.{
@@ -307,6 +357,7 @@ pub const TreeSitter = struct {
     per_thread_highlights: []ThreadHighlights,
     highlights: LineQueryHighlights,
     render_thread_pool: Pool,
+    update_tasks: ConcurrentArrayList(*HighlightsUpdateTask),
 
     pub fn initFromFileExtension(allocator: std.mem.Allocator, config: Config, extension: []const u8) !?TreeSitter {
         const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
@@ -333,6 +384,7 @@ pub const TreeSitter = struct {
             .per_thread_highlights = per_thread_highlights,
             .highlights = LineQueryHighlights.init(allocator),
             .render_thread_pool = Pool.init(@max(1, std.Thread.getCpuCount() catch 1)),
+            .update_tasks = ConcurrentArrayList(*HighlightsUpdateTask).init(allocator),
         };
     }
 
@@ -341,34 +393,41 @@ pub const TreeSitter = struct {
         self.queries.deinit();
         self.allocator.free(self.per_thread_highlights);
         self.render_thread_pool.deinit();
-        for (0..self.highlights.items.len) |i| {
-            self.highlights.items[i].deinit();
-        }
         for (self.highlights.items) |*hls| {
-            var iter = hls.iterator();
+            var iter = hls.*.iterator();
             while (iter.next()) |entry| {
                 entry.value_ptr.*.deinit();
                 self.allocator.destroy(entry.value_ptr.*);
             }
-            hls.deinit();
+            hls.*.deinit();
+            self.allocator.destroy(hls.*);
         }
         self.highlights.deinit();
+        self.update_tasks.rwlock.lock();
+        for (self.update_tasks.array_list.items) |*task| {
+            self.allocator.destroy(task.*);
+        }
+        self.update_tasks.rwlock.unlock();
+        self.update_tasks.deinit();
     }
 
     pub fn parseBuffer(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8))) !void {
         self.tree = try self.parser.parseString(self.tree, buffer);
         for (self.highlights.items) |*hls| {
-            var iter = hls.iterator();
+            var iter = hls.*.iterator();
             while (iter.next()) |entry| {
                 entry.value_ptr.*.deinit();
                 self.allocator.destroy(entry.value_ptr.*);
             }
-            hls.deinit();
+            hls.*.deinit();
+            self.allocator.destroy(hls.*);
         }
         self.highlights.deinit();
         self.highlights = LineQueryHighlights.init(self.allocator);
         for (0..lines.items.len) |_| {
-            try self.highlights.append(QueryHighlights.init(self.allocator));
+            const hl: *QueryHighlights = try self.allocator.create(QueryHighlights);
+            hl.* = QueryHighlights.init(self.allocator);
+            try self.highlights.append(hl);
         }
         const root = self.tree.?.rootNodeWithOffset(0, .{
             .row = 0,
@@ -382,10 +441,14 @@ pub const TreeSitter = struct {
             wg.start();
             task.* = .{
                 .wg = &wg,
-                .parent = self,
+                .allocator = self.allocator,
+                .queries = &self.queries,
+                .language = self.language,
+                .config = &self.config,
+                .highlights = &self.highlights,
+                .highlight_indices = &self.per_thread_highlights[i],
                 .lines = lines,
                 .buffer_size = buffer.len,
-                .highlights = &self.per_thread_highlights[i],
                 .root = root,
             };
             Pool.schedule(&self.render_thread_pool, &task.task);
@@ -393,36 +456,54 @@ pub const TreeSitter = struct {
     }
 
     pub fn reprocessRange(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8)), range: Range) !void {
-        for (range.start..range.end) |i| {
-            var hls = &self.highlights.items[i];
-            var iter = hls.iterator();
-            while (iter.next()) |entry| {
-                entry.value_ptr.*.deinit();
-                self.allocator.destroy(entry.value_ptr.*);
-            }
-            hls.deinit();
+        // TODO: Should have a fixed set of threads that each have a queue of tasks to pull from and perform.
+        //       A single thread should be responsible for HighlightUpdateTasks to do @atomicRmw exchanges on
+        //       the highlight lines. This function should then just push these necessary tasks to the thread
+        //       queues
+        std.log.err("Range {d}-{d}", .{ range.start, range.end + 1 });
+        const new_highlights: *LineQueryHighlights = try self.allocator.create(LineQueryHighlights);
+        new_highlights.* = LineQueryHighlights.init(self.allocator);
+        for (range.start..range.end + 1) |_| {
+            const hls: *QueryHighlights = try self.allocator.create(QueryHighlights);
             hls.* = QueryHighlights.init(self.allocator);
+            try new_highlights.append(hls);
         }
+        std.log.err("New HL count: {d}", .{new_highlights.items.len});
         const root = self.tree.?.rootNodeWithOffset(0, .{
             .row = 0,
             .column = 0,
         });
         const tasks: []QueryTask = try self.allocator.alloc(QueryTask, self.per_thread_highlights.len);
-        defer self.allocator.free(tasks);
-        var wg = std.Thread.WaitGroup{};
-        defer wg.wait();
+        var wg = try self.allocator.create(std.Thread.WaitGroup);
+        wg.* = .{};
         for (tasks, 0..) |*task, i| {
             wg.start();
             task.* = .{
-                .wg = &wg,
-                .parent = self,
+                .wg = wg,
+                .allocator = self.allocator,
+                .queries = &self.queries,
+                .language = self.language,
+                .config = &self.config,
+                .highlights = new_highlights,
+                .highlight_indices = &self.per_thread_highlights[i],
                 .lines = lines,
                 .buffer_size = buffer.len,
-                .highlights = &self.per_thread_highlights[i],
                 .root = root,
             };
             Pool.schedule(&self.render_thread_pool, &task.task);
         }
+        const update_task: *HighlightsUpdateTask = try self.allocator.create(HighlightsUpdateTask);
+        update_task.* = .{
+            .wg = wg,
+            .allocator = self.allocator,
+            .old_highlights = &self.highlights,
+            .new_highlights = new_highlights,
+            .line_range = range,
+            .tasks = tasks,
+            .done = false,
+        };
+        Pool.schedule(&self.render_thread_pool, &update_task.task);
+        try self.update_tasks.insert(0, update_task);
     }
 
     pub fn drawBuffer(self: *@This(), window: vaxis.Window, window_lines_offset: Range) !void {
@@ -430,7 +511,7 @@ pub const TreeSitter = struct {
         //       that it will need to be. I also feel like I'm going to look at this
         //       comment in future and say "Wow.. that was dumb".. but yeah.
         for (window_lines_offset.start..window_lines_offset.end) |i| {
-            var query_highlights: QueryHighlights = self.highlights.items[i];
+            var query_highlights: *QueryHighlights = self.highlights.items[i];
             var iter = query_highlights.iterator();
             while (iter.next()) |entry| {
                 var highlights: *Highlights = entry.value_ptr.*;
@@ -439,6 +520,19 @@ pub const TreeSitter = struct {
                     _ = try window.printSegment(hl.segment, hl.print_options);
                 }
                 highlights.rwlock.unlockShared();
+            }
+        }
+        var count = self.update_tasks.count();
+        while (count > 0) : (count -= 1) {
+            if (self.update_tasks.popOrNull()) |task| {
+                if (task.done) {
+                    self.allocator.destroy(task.wg);
+                    self.allocator.destroy(task);
+                    continue;
+                }
+                try self.update_tasks.insert(0, task);
+            } else {
+                break;
             }
         }
     }

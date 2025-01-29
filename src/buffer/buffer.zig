@@ -535,14 +535,9 @@ pub const Buffer = struct {
 
     pub fn reprocessRange(self: *@This(), offset_range: Range, line_range: Range) !void {
         if (self.tree_sitter) |*ts| {
-            var range_lines = Lines.init(self.allocator);
-            defer range_lines.deinit();
-            // FIXME: This doesn't live long enough for the threads that
-            //        do the query processing in tree_sitter.zig
-            try range_lines.appendSlice(self.lines.items[line_range.start..line_range.end]);
             try ts.*.reprocessRange(
                 self.file_buffer[offset_range.start..offset_range.end],
-                &range_lines,
+                &self.lines,
                 line_range,
             );
         }

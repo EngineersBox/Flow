@@ -394,16 +394,16 @@ pub const Flow = struct {
                             .column = @intCast(new_cursor.col),
                             .row = @intCast(new_cursor.line),
                         },
-                        .start_byte = @intCast(self.cursor_offset),
                         .old_end_point = .{
                             .column = @intCast(previous_cursor.col),
                             .row = @intCast(previous_cursor.line),
                         },
-                        .old_end_byte = @as(u32, @intCast(self.cursor_offset)) + 1,
                         .new_end_point = .{
                             .column = @intCast(new_cursor.col),
                             .row = @intCast(new_cursor.line),
                         },
+                        .start_byte = @intCast(self.cursor_offset),
+                        .old_end_byte = @intCast(self.cursor_offset + 1),
                         .new_end_byte = @intCast(self.cursor_offset),
                     };
                     ts.tree.?.edit(&edit);

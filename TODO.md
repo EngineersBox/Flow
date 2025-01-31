@@ -10,6 +10,7 @@
 * [X] Cursor at end of document moving to the right causes a crash when there is no newline at the end
 * [ ] Hard to replicate issue where `shiftCursorRow` indexes window lines out of bounds. Implies `self.vx.screen.cursor_row` is not updated correctly in some operation beforehand, likely to with insert/delete at the end of the buffer
 * [ ] `RwLock` synchronisation over `QueryHighlights` map is a naive solution that needs better management. Maybe a segmented distributed map?
+* [ ] Buffer calculated in `buffer#reprocessRange` references original file content, it should use updated line content
 
 ## Implement
 

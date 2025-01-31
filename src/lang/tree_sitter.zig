@@ -313,8 +313,10 @@ const QueryTask = struct {
         var tag: ?Tag = null;
         if (tags.* != null and tags.*.?.items.len > 0) {
             tag = tags.*.?.getLast();
+            std.log.err("HL Tag: {s}", .{tag.?.items});
             const theme_highlight = self.config.theme.get(tag.?.items);
             if (theme_highlight) |hl| {
+                std.log.err("Highlight color: {d},{d},{d}", .{ hl.colour.rgb[0], hl.colour.rgb[1], hl.colour.rgb[2] });
                 style.fg = hl.colour;
                 style.bold = hl.bold;
                 style.italic = hl.italic;

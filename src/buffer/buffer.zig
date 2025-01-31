@@ -536,6 +536,9 @@ pub const Buffer = struct {
     pub fn reprocessRange(self: *@This(), offset_range: Range, line_range: Range) !void {
         if (self.tree_sitter) |*ts| {
             try ts.*.reprocessRange(
+                // FIXME: This range references unchanged content since it is from the file buffer.
+                //        We should instead pass a buffer to this function that contains the content
+                //        of the range that was changed
                 self.file_buffer[offset_range.start..offset_range.end],
                 &self.lines,
                 line_range,

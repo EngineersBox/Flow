@@ -205,22 +205,23 @@ const HighlightsUpdateTask = struct {
         self.wg.wait();
         std.log.err("Modifying range: {d}-{d}", .{ self.line_range.start, self.line_range.end });
         for (self.line_range.start..self.line_range.end + 1) |i| {
+            const offset_index = i - self.line_range.start;
             std.log.err("BEFORE {d}  [Old: {d}] [New: {d}]", .{
                 i,
                 @intFromPtr(self.old_highlights.items[i]),
-                @intFromPtr(self.new_highlights.items[i]),
+                @intFromPtr(self.new_highlights.items[offset_index]),
             });
             const old = @atomicRmw(
                 *QueryHighlights,
                 &self.old_highlights.items[i],
                 std.builtin.AtomicRmwOp.Xchg,
-                self.new_highlights.items[i],
+                self.new_highlights.items[offset_index],
                 std.builtin.AtomicOrder.acq_rel,
             );
             std.log.err("AFTER {d} [Old: {d}] [New: {d}]", .{
                 i,
                 @intFromPtr(self.old_highlights.items[i]),
-                @intFromPtr(self.new_highlights.items[i]),
+                @intFromPtr(self.new_highlights.items[offset_index]),
             });
             defer old.deinit();
             var iter = old.iterator();
@@ -246,6 +247,7 @@ const QueryTask = struct {
     highlights: *LineQueryHighlights,
     highlight_indices: *ThreadHighlights,
     lines: *std.ArrayList(std.ArrayList(u8)),
+    line_range: Range,
     buffer_size: usize,
     root: zts.Node,
 
@@ -275,8 +277,8 @@ const QueryTask = struct {
             cursor.exec(query, self.root);
             cursor.setByteRange(0, @intCast(self.buffer_size));
             cursor.setPointRange(
-                .{ .row = 0, .column = 0 },
-                .{ .row = @intCast(self.lines.items.len), .column = 0 },
+                .{ .row = @intCast(self.line_range.start), .column = 0 },
+                .{ .row = @intCast(self.line_range.end + 1), .column = 0 },
             );
             var match: zts.QueryMatch = undefined;
             while (true) {
@@ -321,7 +323,7 @@ const QueryTask = struct {
                 }
             }
         }
-        var query_highlights: *QueryHighlights = self.highlights.items[@intCast(start.row)];
+        var query_highlights: *QueryHighlights = self.highlights.items[@intCast(start.row - self.line_range.start)];
         query_highlights.rwlock.lock();
         defer query_highlights.rwlock.unlock();
         var highlights = query_highlights.map.get(query_string);
@@ -330,6 +332,17 @@ const QueryTask = struct {
             highlights.?.* = Highlights.init(self.allocator);
             try query_highlights.map.put(query_string, highlights.?);
         }
+        std.log.err(
+            "[HL] Text: '{s}' Row: {d} Column: {d} Colour: ({d},{d},{d})",
+            .{
+                self.lines.items[start.row].items[start.column..end.column],
+                start.row,
+                start.column,
+                if (style.fg == .default) 0xFF else style.fg.rgb[0],
+                if (style.fg == .default) 0xFF else style.fg.rgb[1],
+                if (style.fg == .default) 0xFF else style.fg.rgb[2],
+            },
+        );
         try highlights.?.append(.{
             .child_options = .{
                 .width = .{ .limit = end.column - start.column },
@@ -448,6 +461,11 @@ pub const TreeSitter = struct {
                 .highlights = &self.highlights,
                 .highlight_indices = &self.per_thread_highlights[i],
                 .lines = lines,
+                .line_range = .{
+                    .start = 0,
+                    .end = lines.items.len -| 1,
+                    .max_diff = null,
+                },
                 .buffer_size = buffer.len,
                 .root = root,
             };
@@ -459,8 +477,8 @@ pub const TreeSitter = struct {
         // TODO: Should have a fixed set of threads that each have a queue of tasks to pull from and perform.
         //       A single thread should be responsible for HighlightUpdateTasks to do @atomicRmw exchanges on
         //       the highlight lines. This function should then just push these necessary tasks to the thread
-        //       queues
-        std.log.err("Range {d}-{d}", .{ range.start, range.end + 1 });
+        //       queues.
+        std.log.err("Range {d}-{d} Buffer: {s}", .{ range.start, range.end + 1, buffer });
         const new_highlights: *LineQueryHighlights = try self.allocator.create(LineQueryHighlights);
         new_highlights.* = LineQueryHighlights.init(self.allocator);
         for (range.start..range.end + 1) |_| {
@@ -487,6 +505,7 @@ pub const TreeSitter = struct {
                 .highlights = new_highlights,
                 .highlight_indices = &self.per_thread_highlights[i],
                 .lines = lines,
+                .line_range = range,
                 .buffer_size = buffer.len,
                 .root = root,
             };

@@ -393,6 +393,31 @@ pub const Flow = struct {
                 // position calculations to correctly remove the character
                 // at the start of end of a line
                 if (self.active_window.?.buffer.?.tree_sitter) |*ts| {
+                    // TODO: Try using tree.?.rootNode().getDescendantForPointRange(p0, p1)
+                    //       to get the node we are modifying, and then use the point & byte
+                    //       ranges on the node as the edit (change the ranges by adding/removing)
+                    const target_node = ts.tree.?.rootNode().getDescendantForPointRange(
+                        .{
+                            .column = @intCast(new_cursor.col),
+                            .row = @intCast(new_cursor.line),
+                        },
+                        .{
+                            .column = @intCast(previous_cursor.col),
+                            .row = @intCast(previous_cursor.line),
+                        },
+                    );
+                    if (target_node == null) {
+                        std.log.err(
+                            "No target node in range ({d},{d}) to ({d},{d})",
+                            .{
+                                new_cursor.col,
+                                new_cursor.line,
+                                previous_cursor.col,
+                                previous_cursor.line,
+                            },
+                        );
+                        return;
+                    }
                     const edit = zts.InputEdit{
                         .start_point = .{
                             .column = @intCast(new_cursor.col),
@@ -411,6 +436,7 @@ pub const Flow = struct {
                         .new_end_byte = @intCast(self.cursor_offset),
                     };
                     ts.tree.?.edit(&edit);
+                    // TODO: Get target node again and compare the ranges
                     try self.active_window.?.buffer.?.reprocessRange(.{
                         .start = @min(new_cursor.line, previous_cursor.line),
                         .end = @max(new_cursor.line, previous_cursor.line),

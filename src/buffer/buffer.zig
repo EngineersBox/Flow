@@ -533,13 +533,15 @@ pub const Buffer = struct {
         return BufferIterator.init(self.allocator, self.piecetable, 0, null);
     }
 
-    pub fn reprocessRange(self: *@This(), offset_range: Range, line_range: Range) !void {
+    pub fn reprocessRange(self: *@This(), line_range: Range) !void {
         if (self.tree_sitter) |*ts| {
+            var modified_range_size: usize = 0;
+            for (line_range.start..line_range.end) |i| {
+                const line: *Line = &self.lines.items[i];
+                modified_range_size += line.items.len;
+            }
             try ts.*.reprocessRange(
-                // FIXME: This range references unchanged content since it is from the file buffer.
-                //        We should instead pass a buffer to this function that contains the content
-                //        of the range that was changed
-                self.file_buffer[offset_range.start..offset_range.end],
+                modified_range_size,
                 &self.lines,
                 line_range,
             );

@@ -407,21 +407,11 @@ pub const Flow = struct {
                         .new_end_byte = @intCast(self.cursor_offset),
                     };
                     ts.tree.?.edit(&edit);
-                    var offset_range: Range = .{
-                        .start = self.cursor_offset,
-                        .end = self.cursor_offset,
+                    try self.active_window.?.buffer.?.reprocessRange(.{
+                        .start = @min(new_cursor.line, previous_cursor.line),
+                        .end = @max(new_cursor.line, previous_cursor.line),
                         .max_diff = null,
-                    };
-                    while (offset_range.start > 0 and self.active_window.?.buffer.?.file_buffer[offset_range.start] != '\n') : (offset_range.start -= 1) {}
-                    while (offset_range.end < self.active_window.?.buffer.?.file_buffer.len - 1 and self.active_window.?.buffer.?.file_buffer[offset_range.end] != '\n') : (offset_range.end += 1) {}
-                    try self.active_window.?.buffer.?.reprocessRange(
-                        offset_range,
-                        .{
-                            .start = @min(new_cursor.line, previous_cursor.line),
-                            .end = @max(new_cursor.line, previous_cursor.line),
-                            .max_diff = null,
-                        },
-                    );
+                    });
                 }
             },
             vaxis.Key.left => {

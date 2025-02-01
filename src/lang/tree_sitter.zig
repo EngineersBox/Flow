@@ -15,7 +15,8 @@ const TREE_SITTER_QUERIES_PATH = @import("../config.zig").TREE_SITTER_QUERIES_PA
 const _ranges = @import("../window/range.zig");
 const Range = _ranges.Range;
 const ConcurrentArrayList = @import("../containers/concurrent_array_list.zig").ConcurrentArrayList;
-const ConcurrentStringHashMap = @import("../containers//concurrent_string_hash_map.zig").ConcurrentStringHashMap;
+const ConcurrentStringHashMap = @import("../containers/concurrent_string_hash_map.zig").ConcurrentStringHashMap;
+const ConcurrentArrayHashMap = @import("../containers/concurrent_array_hash_map.zig").ConcurrentArrayHashMap;
 
 pub const TreeIterator = struct {
     cursor: zts.TreeCursor,
@@ -185,7 +186,11 @@ const Highlight = struct {
     segment: vaxis.Segment,
     print_options: vaxis.PrintOptions,
 };
-const Highlights = ConcurrentArrayList(Highlight);
+// TODO: Make this a map of line offset (usize) to Highlight so
+//       that we can check if a highlight already exists and if
+//       it should be superseded by another or not.
+const Highlights = ConcurrentArrayHashMap(usize, Highlight, std.array_hash_map.AutoContext(usize), true);
+// const Highlights = ConcurrentArrayList(Highlight);
 const QueryHighlights = ConcurrentStringHashMap(*Highlights);
 const LineQueryHighlights = std.ArrayList(*QueryHighlights);
 
@@ -345,7 +350,13 @@ const QueryTask = struct {
                 if (style.fg == .default) 0xFF else style.fg.rgb[2],
             },
         );
-        try highlights.?.append(.{
+        highlights.?.rwlock.lock();
+        defer highlights.?.rwlock.unlock();
+        const current_hl = highlights.?.map.get(start.column);
+        if (current_hl != null and current_hl.?.segment.style.fg == .default) {
+            return;
+        }
+        try highlights.?.map.put(start.column, .{
             .child_options = .{
                 .width = .{ .limit = end.column - start.column },
                 .height = .{ .limit = @max(1, end.row - start.row) },
@@ -475,12 +486,12 @@ pub const TreeSitter = struct {
         }
     }
 
-    pub fn reprocessRange(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8)), range: Range) !void {
+    pub fn reprocessRange(self: *@This(), modified_range_len: usize, lines: *std.ArrayList(std.ArrayList(u8)), range: Range) !void {
         // TODO: Should have a fixed set of threads that each have a queue of tasks to pull from and perform.
         //       A single thread should be responsible for HighlightUpdateTasks to do @atomicRmw exchanges on
         //       the highlight lines. This function should then just push these necessary tasks to the thread
         //       queues.
-        std.log.err("Range {d}-{d} Buffer: {s}", .{ range.start, range.end + 1, buffer });
+        std.log.err("Range {d}-{d}", .{ range.start, range.end + 1 });
         const new_highlights: *LineQueryHighlights = try self.allocator.create(LineQueryHighlights);
         new_highlights.* = LineQueryHighlights.init(self.allocator);
         for (range.start..range.end + 1) |_| {
@@ -508,7 +519,7 @@ pub const TreeSitter = struct {
                 .highlight_indices = &self.per_thread_highlights[i],
                 .lines = lines,
                 .line_range = range,
-                .buffer_size = buffer.len,
+                .buffer_size = modified_range_len,
                 .root = root,
             };
             Pool.schedule(&self.render_thread_pool, &task.task);
@@ -536,11 +547,11 @@ pub const TreeSitter = struct {
             var iter = query_highlights.iterator();
             while (iter.next()) |entry| {
                 var highlights: *Highlights = entry.value_ptr.*;
-                highlights.rwlock.lockShared();
-                for (highlights.array_list.items) |hl| {
+                var hl_iter = highlights.iterator();
+                while (hl_iter.next()) |hl_entry| {
+                    const hl = hl_entry.value_ptr;
                     _ = try window.printSegment(hl.segment, hl.print_options);
                 }
-                highlights.rwlock.unlockShared();
             }
         }
         var count = self.update_tasks.count();

@@ -52,13 +52,13 @@ pub fn ConcurrentArrayHashMap(comptime K: type, comptime V: type, comptime Conte
             return true;
         }
 
-        pub fn count(self: @This()) usize {
+        pub fn count(self: *@This()) usize {
             self.rwlock.lockShared();
             defer self.rwlock.unlockShared();
             return self.map.count();
         }
 
-        pub fn tryCount(self: @This()) struct { count: usize, aquired: bool } {
+        pub fn tryCount(self: *@This()) struct { count: usize, aquired: bool } {
             if (!self.rwlock.tryLockShared()) {
                 return .{
                     .count = 0,
@@ -67,6 +67,10 @@ pub fn ConcurrentArrayHashMap(comptime K: type, comptime V: type, comptime Conte
             }
             self.rwlock.unlockShared();
             return self.map.count();
+        }
+
+        pub fn iterator(self: *@This()) Iterator {
+            return Iterator.init(&self.map, &self.rwlock);
         }
 
         pub const Iterator = struct {

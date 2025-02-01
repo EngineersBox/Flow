@@ -186,11 +186,7 @@ const Highlight = struct {
     segment: vaxis.Segment,
     print_options: vaxis.PrintOptions,
 };
-// TODO: Make this a map of line offset (usize) to Highlight so
-//       that we can check if a highlight already exists and if
-//       it should be superseded by another or not.
 const Highlights = ConcurrentArrayHashMap(usize, Highlight, std.array_hash_map.AutoContext(usize), true);
-// const Highlights = ConcurrentArrayList(Highlight);
 const QueryHighlights = ConcurrentStringHashMap(*Highlights);
 const LineQueryHighlights = std.ArrayList(*QueryHighlights);
 

@@ -293,7 +293,11 @@ pub const Flow = struct {
             vaxis.Key.space...0x7E,
             0x80...0xFF,
             => {
-                try self.active_window.?.buffer.?.insert(self.cursor_offset, &.{@intCast(key.codepoint)}, &self.active_window.?.ranges.?);
+                try self.active_window.?.buffer.?.insert(
+                    self.cursor_offset,
+                    if (key.text) |text| text else &.{@intCast(key.codepoint)},
+                    &self.active_window.?.ranges.?,
+                );
                 const line: *Line = self.getCurrentLine();
                 try line.insert(self.vx.screen.cursor_col, @intCast(key.codepoint));
                 try self.shiftCursorCol(1);

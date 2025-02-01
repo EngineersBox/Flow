@@ -314,16 +314,18 @@ const QueryTask = struct {
         var tag: ?Tag = null;
         if (tags.* != null and tags.*.?.items.len > 0) {
             tag = tags.*.?.getLast();
-            std.log.err("HL Tag: {s}", .{tag.?.items});
+            // std.log.err("HL Tag: {s}", .{tag.?.items});
             const theme_highlight = self.config.theme.get(tag.?.items);
             if (theme_highlight) |hl| {
-                std.log.err("Highlight color: {d},{d},{d}", .{ hl.colour.rgb[0], hl.colour.rgb[1], hl.colour.rgb[2] });
+                std.log.err("Tag: {s} Highlight color: {d},{d},{d}", .{ tag.?.items, hl.colour.rgb[0], hl.colour.rgb[1], hl.colour.rgb[2] });
                 style.fg = hl.colour;
                 style.bold = hl.bold;
                 style.italic = hl.italic;
                 if (hl.underline) {
                     style.ul = hl.colour;
                 }
+            } else {
+                std.log.err("Tag: {s} No Color", .{tag.?.items});
             }
         }
         var query_highlights: *QueryHighlights = self.highlights.items[@intCast(start.row - self.line_range.start)];
@@ -336,8 +338,9 @@ const QueryTask = struct {
             try query_highlights.map.put(query_string, highlights.?);
         }
         std.log.err(
-            "[HL] Text: '{s}' Row: {d} Column: {d} Colour: ({d},{d},{d})",
+            "[HL] Tag: {s} Text: '{s}' Row: {d} Column: {d} Colour: ({d},{d},{d})",
             .{
+                tag.?.items,
                 self.lines.items[start.row].items[start.column..end.column],
                 start.row,
                 start.column,

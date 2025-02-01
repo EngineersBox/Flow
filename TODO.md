@@ -8,9 +8,9 @@
 * [X] Cursor offset is not correctly calculated after altering buffer contents. I.e inserting a newline into the middle of a line
 * [X] Backspace at start of line seems to fail sometimes and join only part of the line
 * [X] Cursor at end of document moving to the right causes a crash when there is no newline at the end
+* [X] Buffer calculated in `buffer#reprocessRange` references original file content, it should use updated line content
 * [ ] Hard to replicate issue where `shiftCursorRow` indexes window lines out of bounds. Implies `self.vx.screen.cursor_row` is not updated correctly in some operation beforehand, likely to with insert/delete at the end of the buffer
 * [ ] `RwLock` synchronisation over `QueryHighlights` map is a naive solution that needs better management. Maybe a segmented distributed map?
-* [X] Buffer calculated in `buffer#reprocessRange` references original file content, it should use updated line content
 * [ ] Modifiers don't change inserted character correctly
 * [ ] TS queries after edit (i.e. remove `@` from `@import`) still return old highlight tag despite updating tree
 

@@ -384,14 +384,23 @@ pub const TreeSitter = struct {
     render_thread_pool: Pool,
     update_tasks: ConcurrentArrayList(*HighlightsUpdateTask),
 
-    pub fn initFromFileExtension(allocator: std.mem.Allocator, config: Config, extension: []const u8) !?TreeSitter {
+    pub fn initFromFileExtension(
+        allocator: std.mem.Allocator,
+        config: Config,
+        extension: []const u8,
+    ) !?TreeSitter {
         const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
             return null;
         };
         return try TreeSitter.init(allocator, config, try loadGrammar(grammar), grammar);
     }
 
-    pub fn init(allocator: std.mem.Allocator, config: Config, language: *const zts.Language, grammar: zts.LanguageGrammar) !TreeSitter {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        config: Config,
+        language: *const zts.Language,
+        grammar: zts.LanguageGrammar,
+    ) !TreeSitter {
         const parser = try zts.Parser.init();
         try parser.setLanguage(language);
         var queries = try loadHighlightQueries(allocator, grammar);
@@ -485,7 +494,13 @@ pub const TreeSitter = struct {
         }
     }
 
-    pub fn reprocessRange(self: *@This(), modified_range_len: usize, lines: *std.ArrayList(std.ArrayList(u8)), range: Range, input: zts.Input) !void {
+    pub fn reprocessRange(
+        self: *@This(),
+        modified_range_len: usize,
+        lines: *std.ArrayList(std.ArrayList(u8)),
+        range: Range,
+        input: zts.Input,
+    ) !void {
         // TODO: Should have a fixed set of threads that each have a queue of tasks to pull from and perform.
         //       A single thread should be responsible for HighlightUpdateTasks to do @atomicRmw exchanges on
         //       the highlight lines. This function should then just push these necessary tasks to the thread

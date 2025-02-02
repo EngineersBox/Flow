@@ -128,8 +128,8 @@ pub const Flow = struct {
             }
         }
         self.active_window = Window.init(self.vx.window().child(.{}));
-        try self.active_window.?.setBufferWindow(0, @intCast(self.vx.screen.height));
         try self.active_window.?.bindBuffer(self.buffer);
+        try self.active_window.?.setBufferWindow(0, @intCast(self.vx.screen.height - 1));
         try self.buffer.parseIntoTreeSitter();
         while (!self.should_quit) {
             // pollEvent blocks until we have an event
@@ -277,6 +277,60 @@ pub const Flow = struct {
         self.adjustCursorOffset(prev_row, prev_col);
     }
 
+    fn deleteCharAtCursorInTS(self: *@This(), new_cursor: Position, previous_cursor: Position) !void {
+        if (self.active_window == null or self.active_window.?.buffer == null or self.active_window.?.buffer.?.tree_sitter == null) {
+            return;
+        }
+        const ts = &self.active_window.?.buffer.?.tree_sitter.?;
+        // TODO: Try using tree.?.rootNode().getDescendantForPointRange(p0, p1)
+        //       to get the node we are modifying, and then use the point & byte
+        //       ranges on the node as the edit (change the ranges by adding/removing)
+        const target_node = ts.tree.?.rootNode().getDescendantForPointRange(
+            .{
+                .column = @intCast(new_cursor.col),
+                .row = @intCast(new_cursor.line),
+            },
+            .{
+                .column = @intCast(previous_cursor.col),
+                .row = @intCast(previous_cursor.line),
+            },
+        );
+        if (target_node == null) {
+            std.log.err(
+                "No target node in range ({d},{d}) to ({d},{d})",
+                .{
+                    new_cursor.col,
+                    new_cursor.line,
+                    previous_cursor.col,
+                    previous_cursor.line,
+                },
+            );
+            return;
+        }
+        std.log.err("Found node @ ({d},{d}) to ({d},{d}) AKA {d} to {d}", .{
+            target_node.?.getStartPoint().column,
+            target_node.?.getStartPoint().row,
+            target_node.?.getEndPoint().column,
+            target_node.?.getEndPoint().row,
+            target_node.?.getStartByte(),
+            target_node.?.getEndByte(),
+        });
+        // TODO: Handle the case when we delete the last char in a node
+        const end_point = target_node.?.getEndPoint();
+        const end_byte = target_node.?.getEndByte();
+        const edit = zts.InputEdit{ .start_point = target_node.?.getStartPoint(), .old_end_point = end_point, .new_end_point = .{
+            .column = end_point.column - 1,
+            .row = end_point.row,
+        }, .start_byte = target_node.?.getStartByte(), .old_end_byte = end_byte, .new_end_byte = end_byte - 1 };
+        ts.tree.?.edit(&edit);
+        // TODO: Get target node again and compare the ranges to verify this works
+        try self.active_window.?.buffer.?.reprocessRange(.{
+            .start = @min(new_cursor.line, previous_cursor.line),
+            .end = @max(new_cursor.line, previous_cursor.line),
+            .max_diff = null,
+        });
+    }
+
     fn handleModeInsert(self: *@This(), key: vaxis.Key) !void {
         switch (key.codepoint) {
             vaxis.Key.enter => {
@@ -392,57 +446,7 @@ pub const Flow = struct {
                 // Update TS after as we can rely on the cursor position
                 // position calculations to correctly remove the character
                 // at the start of end of a line
-                if (self.active_window.?.buffer.?.tree_sitter) |*ts| {
-                    // TODO: Try using tree.?.rootNode().getDescendantForPointRange(p0, p1)
-                    //       to get the node we are modifying, and then use the point & byte
-                    //       ranges on the node as the edit (change the ranges by adding/removing)
-                    const target_node = ts.tree.?.rootNode().getDescendantForPointRange(
-                        .{
-                            .column = @intCast(new_cursor.col),
-                            .row = @intCast(new_cursor.line),
-                        },
-                        .{
-                            .column = @intCast(previous_cursor.col),
-                            .row = @intCast(previous_cursor.line),
-                        },
-                    );
-                    if (target_node == null) {
-                        std.log.err(
-                            "No target node in range ({d},{d}) to ({d},{d})",
-                            .{
-                                new_cursor.col,
-                                new_cursor.line,
-                                previous_cursor.col,
-                                previous_cursor.line,
-                            },
-                        );
-                        return;
-                    }
-                    const edit = zts.InputEdit{
-                        .start_point = .{
-                            .column = @intCast(new_cursor.col),
-                            .row = @intCast(new_cursor.line),
-                        },
-                        .old_end_point = .{
-                            .column = @intCast(previous_cursor.col),
-                            .row = @intCast(previous_cursor.line),
-                        },
-                        .new_end_point = .{
-                            .column = @intCast(new_cursor.col),
-                            .row = @intCast(new_cursor.line),
-                        },
-                        .start_byte = @intCast(self.cursor_offset),
-                        .old_end_byte = @intCast(self.cursor_offset + 1),
-                        .new_end_byte = @intCast(self.cursor_offset),
-                    };
-                    ts.tree.?.edit(&edit);
-                    // TODO: Get target node again and compare the ranges
-                    try self.active_window.?.buffer.?.reprocessRange(.{
-                        .start = @min(new_cursor.line, previous_cursor.line),
-                        .end = @max(new_cursor.line, previous_cursor.line),
-                        .max_diff = null,
-                    });
-                }
+                try self.deleteCharAtCursorInTS(new_cursor, previous_cursor);
             },
             vaxis.Key.left => {
                 try self.shiftCursorCol(-1);

@@ -543,7 +543,7 @@ pub const Buffer = struct {
         return true;
     }
 
-    pub fn cursorOffsetInRange(self: *@This(), pos: Position, ranges: *WindowRanges) !?usize {
+    pub fn cursorOffsetInRange(self: *@This(), pos: Position, ranges: *WindowRanges) ?usize {
         var line: usize = ranges.lines.start;
         var col: usize = 0;
         var offset: usize = 0;

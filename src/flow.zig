@@ -282,9 +282,6 @@ pub const Flow = struct {
             return;
         }
         const ts = &self.active_window.?.buffer.?.tree_sitter.?;
-        // TODO: Try using tree.?.rootNode().getDescendantForPointRange(p0, p1)
-        //       to get the node we are modifying, and then use the point & byte
-        //       ranges on the node as the edit (change the ranges by adding/removing)
         const target_node = ts.tree.?.rootNode().getDescendantForPointRange(
             .{
                 .column = @intCast(new_cursor.col),
@@ -318,12 +315,18 @@ pub const Flow = struct {
         // TODO: Handle the case when we delete the last char in a node
         const end_point = target_node.?.getEndPoint();
         const end_byte = target_node.?.getEndByte();
-        const edit = zts.InputEdit{ .start_point = target_node.?.getStartPoint(), .old_end_point = end_point, .new_end_point = .{
-            .column = end_point.column - 1,
-            .row = end_point.row,
-        }, .start_byte = target_node.?.getStartByte(), .old_end_byte = end_byte, .new_end_byte = end_byte - 1 };
+        const edit = zts.InputEdit{
+            .start_point = target_node.?.getStartPoint(),
+            .old_end_point = end_point,
+            .new_end_point = .{
+                .column = end_point.column - 1,
+                .row = end_point.row,
+            },
+            .start_byte = target_node.?.getStartByte(),
+            .old_end_byte = end_byte,
+            .new_end_byte = end_byte - 1,
+        };
         ts.tree.?.edit(&edit);
-        // TODO: Get target node again and compare the ranges to verify this works
         try self.active_window.?.buffer.?.reprocessRange(.{
             .start = @min(new_cursor.line, previous_cursor.line),
             .end = @max(new_cursor.line, previous_cursor.line),

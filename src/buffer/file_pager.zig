@@ -10,13 +10,13 @@ pub const Page: type = struct {
 
 pub const MmapPager: type = struct {
     pub const MaxFileSize: u64 = 8 * 1024 * 1024 * 1024; // 8 GB
-    pub const PageSize: u64 = 4 * 1024; // 4 KB
+    pub const PageSize: u64 = std.mem.page_size;
 
     ptr: []align(std.mem.page_size) u8,
     len: u64,
     allocator: *std.mem.Allocator,
 
-    pub fn init(fd: std.os.fd_t, allocator: *std.mem.Allocator) !MmapPager {
+    pub fn init(allocator: *std.mem.Allocator, fd: std.os.fd_t) !MmapPager {
         const stats = try std.os.fstat(fd);
         if (stats.size > MaxFileSize) {
             return error.FileTooLarge;

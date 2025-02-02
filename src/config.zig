@@ -5,9 +5,10 @@ const known_folders = @import("known-folders");
 const colours = @import("colours.zig");
 // const re = @cImport(@cInclude("regez.h"));
 
-pub const TREE_SITTER_QUERIES_PATH: []const u8 = "/flow/queries/";
-pub const CONFIG_PATH: []const u8 = "/flow/config.json";
-pub const THEME_PATH: []const u8 = "/flow/theme.json";
+const PATH_SEP: *const [1:0]u8 = std.fs.path.sep_str;
+pub const TREE_SITTER_QUERIES_PATH: []const u8 = PATH_SEP ++ "flow" ++ PATH_SEP ++ "queries" ++ PATH_SEP;
+pub const CONFIG_PATH: []const u8 = PATH_SEP ++ "flow" ++ PATH_SEP ++ "config.json";
+pub const THEME_PATH: []const u8 = PATH_SEP ++ "flow" ++ PATH_SEP ++ "theme.json";
 
 const MaxFileSize: usize = 1 * 1024 * 1024 * 1024; // 1 GB
 

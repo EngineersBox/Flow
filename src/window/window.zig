@@ -34,9 +34,6 @@ pub const Window = struct {
         self.buffer = buffer;
         if (self.ranges) |*ranges| {
             ranges.* = try self.buffer.?.setBufferWindow(0, self.window.height);
-            std.log.err("Bound buffer ranges: ({d},{d})", .{ self.ranges.?.lines.start, self.ranges.?.lines.end });
-        } else {
-            std.log.err("No ranges, cant set buffer window", .{});
         }
     }
 
@@ -47,7 +44,6 @@ pub const Window = struct {
         }
         self.buffer.?.clearLines();
         self.ranges = try self.buffer.?.setBufferWindow(start, height);
-        std.log.err("New buffer window ranges: ({d},{d})", .{ self.ranges.?.lines.start, self.ranges.?.lines.end });
         _ = try self.buffer.?.cacheLines();
     }
 

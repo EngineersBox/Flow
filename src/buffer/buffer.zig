@@ -1,5 +1,6 @@
 const std = @import("std");
 const PieceTable = @import("piecetable").PieceTable;
+const known_folders = @import("known-folders");
 
 const TreeSitter = @import("../lang/tree_sitter.zig").TreeSitter;
 const _range = @import("../window/range.zig");
@@ -7,6 +8,61 @@ const Range = _range.Range;
 const WindowRanges = _range.WindowRanges;
 const Position = _range.Position;
 const Config = @import("../config.zig").Config;
+const _file_pager = @import("file_pager.zig");
+const MmapPager = _file_pager.MmapPager;
+const Page = _file_pager.Page;
+const Files = @import("../files.zig");
+
+pub const TempFile = struct {
+    allocator: std.mem.Allocator,
+    file_path: []const u8,
+    file: std.fs.File,
+    file_open: bool,
+    pager: MmapPager,
+
+    pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !@This() {
+        const temp_file_path = try Files.tempFilePath(allocator, file_path);
+        errdefer allocator.free(temp_file_path);
+        const cache_dir = try known_folders.open(
+            allocator,
+            known_folders.KnownFolder.cache,
+            .{},
+        ) orelse return error.NoCacheDirectory;
+        const temp_file_exists = blk: {
+            _ = cache_dir.statFile(temp_file_path) catch break :blk false;
+            break :blk true;
+        };
+        if (temp_file_exists) {
+            // TODO: Ask user if they want to recover or not
+        } else {
+            try std.fs.copyFileAbsolute(file_path, temp_file_path, .{});
+        }
+        const file = try std.fs.openFileAbsolute(temp_file_path, .{});
+        return .{
+            .allocator = allocator,
+            .file_path = temp_file_path,
+            .file = file,
+            .file_open = true,
+            .pager = MmapPager.init(allocator, file.handle),
+        };
+    }
+
+    pub fn deinit(self: *@This()) void {
+        if (self.file_open) {
+            try self.file.close();
+            self.file_open = false;
+        }
+        self.allocator.free(self.file_path);
+        self.pager.deinit();
+    }
+
+    pub fn deleteTempFile(self: *@This()) !void {
+        defer self.file_open = false;
+        try self.pager.sync();
+        self.file.close();
+        try std.fs.deleteFileAbsolute(self.file_path);
+    }
+};
 
 pub const BufferIterator = struct {
     allocator: std.mem.Allocator,
@@ -76,6 +132,7 @@ pub const Buffer = struct {
     pub const MaxFileSize: u64 = 1 * 1024 * 1024 * 1024; // 1 GB
 
     file_buffer: []const u8,
+    temp_file: TempFile,
     piecetable: PieceTable,
     tree_sitter: ?TreeSitter,
     lines: Lines,
@@ -84,7 +141,7 @@ pub const Buffer = struct {
     meta: FileMeta,
 
     pub fn initFromFile(allocator: std.mem.Allocator, config: Config, file_path: []const u8) !@This() {
-        const buf_and_piecetable: struct { []const u8, PieceTable } = try Buffer.pieceTableFromFile(allocator, file_path);
+        const structures: struct { []const u8, TempFile, PieceTable } = try Buffer.pieceTableFromFile(allocator, file_path);
         var extension: []const u8 = std.fs.path.extension(file_path);
         extension = std.mem.trimLeft(u8, extension, ".");
         const tree_sitter = try TreeSitter.initFromFileExtension(
@@ -95,7 +152,7 @@ pub const Buffer = struct {
         var lines = Lines.init(allocator);
         var iter = BufferIterator.init(
             allocator,
-            buf_and_piecetable[1],
+            structures[2],
             0,
             null,
         );
@@ -103,40 +160,43 @@ pub const Buffer = struct {
             try lines.append(line);
         }
         return .{
-            .file_buffer = buf_and_piecetable[0],
-            .piecetable = buf_and_piecetable[1],
+            .file_buffer = structures[0],
+            .temp_file = structures[1],
+            .piecetable = structures[2],
             .tree_sitter = tree_sitter,
             .lines = lines,
             .file_path = file_path,
             .allocator = allocator,
             .meta = .{
-                .lines = std.mem.count(u8, buf_and_piecetable[0], "\n") + 1,
-                .size = buf_and_piecetable[0].len,
+                .lines = std.mem.count(u8, structures[0], "\n") + 1,
+                .size = structures[0].len,
             },
         };
     }
 
     /// This takes ownership of the buffer, including freeing it when necessary
-    pub fn initFromBuffer(allocator: std.mem.Allocator, buffer: []u8) !@This() {
-        const piecetable = try PieceTable.init(allocator, buffer);
-        const formatted_buffer = try formatNewlines(allocator, buffer);
-        const lines = Lines.init(allocator);
-        var iter = BufferIterator.init(allocator, piecetable, 0, null);
-        while (try iter.next()) |line| {
-            try lines.append(line);
-        }
-        return .{
-            .file_buffer = formatted_buffer,
-            .piecetable = piecetable,
-            .tree_sitter = null,
-            .lines = lines,
-            .file_path = [0]u8{},
-            .allocator = allocator,
-            .meta = .{
-                .lines = std.mem.count(u8, formatted_buffer, "\n") + 1,
-                .size = formatted_buffer.len,
-            },
-        };
+    pub fn initFromBuffer(_: std.mem.Allocator, _: []u8) !@This() {
+        return error.MissingTempFileImplementation;
+        // const piecetable = try PieceTable.init(allocator, buffer);
+        // const formatted_buffer = try formatNewlines(allocator, buffer);
+        // const lines = Lines.init(allocator);
+        // var iter = BufferIterator.init(allocator, piecetable, 0, null);
+        // while (try iter.next()) |line| {
+        //     try lines.append(line);
+        // }
+        // return .{
+        //     .file_buffer = formatted_buffer,
+        //     .temp_file = undefined, // TODO: Randomly generate a file to use in temp directory
+        //     .piecetable = piecetable,
+        //     .tree_sitter = null,
+        //     .lines = lines,
+        //     .file_path = [0]u8{},
+        //     .allocator = allocator,
+        //     .meta = .{
+        //         .lines = std.mem.count(u8, formatted_buffer, "\n") + 1,
+        //         .size = formatted_buffer.len,
+        //     },
+        // };
     }
 
     pub fn deinit(self: *@This()) void {
@@ -161,7 +221,7 @@ pub const Buffer = struct {
         return new_buffer;
     }
 
-    fn pieceTableFromFile(allocator: std.mem.Allocator, file_path: []const u8) !struct { []const u8, PieceTable } {
+    fn pieceTableFromFile(allocator: std.mem.Allocator, file_path: []const u8) !struct { []const u8, TempFile, PieceTable } {
         const file: std.fs.File = try std.fs.openFileAbsolute(file_path, .{ .mode = std.fs.File.OpenMode.read_only });
         defer file.close();
         const stats: std.fs.File.Stat = try file.stat();
@@ -170,7 +230,11 @@ pub const Buffer = struct {
         }
         var buffer: []u8 = try file.readToEndAlloc(allocator, @intCast(stats.size));
         buffer = try formatNewlines(allocator, buffer);
-        return .{ buffer, try PieceTable.init(allocator, buffer) };
+        return .{
+            buffer,
+            try TempFile.init(allocator, file_path),
+            try PieceTable.init(allocator, buffer),
+        };
     }
 
     pub fn insert(self: *@This(), index: usize, bytes: []const u8, ranges: *WindowRanges) error{ OutOfBounds, OutOfMemory }!void {

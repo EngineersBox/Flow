@@ -1,6 +1,7 @@
 const std = @import("std");
 const PieceTable = @import("piecetable").PieceTable;
 const known_folders = @import("known-folders");
+const zts = @import("zts");
 
 const TreeSitter = @import("../lang/tree_sitter.zig").TreeSitter;
 const _range = @import("../window/range.zig");
@@ -43,13 +44,13 @@ pub const TempFile = struct {
             .file_path = temp_file_path,
             .file = file,
             .file_open = true,
-            .pager = MmapPager.init(allocator, file.handle),
+            .pager = try MmapPager.init(allocator, file),
         };
     }
 
     pub fn deinit(self: *@This()) void {
         if (self.file_open) {
-            try self.file.close();
+            self.file.close();
             self.file_open = false;
         }
         self.allocator.free(self.file_path);
@@ -604,11 +605,22 @@ pub const Buffer = struct {
                 const line: *Line = &self.lines.items[i];
                 modified_range_size += line.items.len;
             }
-            try ts.*.reprocessRange(
-                modified_range_size,
-                &self.lines,
-                line_range,
-            );
+            // NOTE: This context will outlive the call to reparse the TS tree
+            //       but will NOT live long enough to be accessible to threads
+            //       spawned within the reprocessRange call. However, this is ok
+            //       as we only need access to it within the lifetime of the
+            //       reprocessRange call.
+            var return_buffer = [1]u8{0};
+            var read_ctx = TSReadContext{
+                .piece_table = &self.piecetable,
+                .return_buffer = &return_buffer,
+            };
+            const input = zts.Input{
+                .payload = @ptrCast(&read_ctx),
+                .read = treeSitterReadFromPieceTable,
+                .encoding = .utf8,
+            };
+            try ts.*.reprocessRange(modified_range_size, &self.lines, line_range, input);
         }
     }
 
@@ -650,9 +662,34 @@ pub const Buffer = struct {
         }
         file.close();
         self.piecetable.deinit();
+        try self.temp_file.deleteTempFile();
+        self.temp_file.deinit();
         self.allocator.free(self.file_buffer);
-        const buffer_and_piecetable: struct { []const u8, PieceTable } = try Buffer.pieceTableFromFile(self.allocator, self.file_path);
-        self.file_buffer = buffer_and_piecetable[0];
-        self.piecetable = buffer_and_piecetable[1];
+        const structure: struct { []const u8, TempFile, PieceTable } = try Buffer.pieceTableFromFile(self.allocator, self.file_path);
+        self.file_buffer = structure[0];
+        self.temp_file = structure[1];
+        self.piecetable = structure[2];
     }
 };
+
+const TSReadContext = struct {
+    piece_table: *PieceTable,
+    return_buffer: *[1]u8,
+};
+
+fn treeSitterReadFromPieceTable(
+    payload: *anyopaque,
+    byte: u32,
+    _: zts.Point,
+    read_count: *u32,
+) callconv(.C) [*]const u8 {
+    const ctx: *TSReadContext = @ptrCast(@alignCast(payload));
+    if (ctx.piece_table.get(byte)) |char| {
+        read_count.* = 1;
+        ctx.return_buffer[0] = char;
+    } else |_| {
+        read_count.* = 0;
+        ctx.return_buffer[0] = 0;
+    }
+    return ctx.return_buffer;
+}

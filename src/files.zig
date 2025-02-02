@@ -6,7 +6,7 @@ pub const PATH_SEP: *const [1:0]u8 = std.fs.path.sep_str;
 /// Caller is responsible for freeing returned slice
 pub fn cwdName(allocator: std.mem.Allocator) ![]const u8 {
     const cwd_path = try std.fs.cwd().realpathAlloc(allocator, ".");
-    const last_sep_index = std.mem.lastIndexOf(cwd_path, PATH_SEP);
+    const last_sep_index = std.mem.lastIndexOf(u8, cwd_path, PATH_SEP);
     if (last_sep_index == null) {
         return cwd_path;
     }
@@ -24,7 +24,7 @@ pub fn subPathRelativeToCwd(allocator: std.mem.Allocator, path: []const u8) ![]c
 }
 
 pub fn lastPathElement(path: []const u8) []const u8 {
-    const last_sep_index = std.mem.lastIndexOf(path, PATH_SEP);
+    const last_sep_index = std.mem.lastIndexOf(u8, path, PATH_SEP);
     if (last_sep_index == null) {
         return path;
     }

@@ -485,7 +485,7 @@ pub const TreeSitter = struct {
         }
     }
 
-    pub fn reprocessRange(self: *@This(), modified_range_len: usize, lines: *std.ArrayList(std.ArrayList(u8)), range: Range) !void {
+    pub fn reprocessRange(self: *@This(), modified_range_len: usize, lines: *std.ArrayList(std.ArrayList(u8)), range: Range, input: zts.Input) !void {
         // TODO: Should have a fixed set of threads that each have a queue of tasks to pull from and perform.
         //       A single thread should be responsible for HighlightUpdateTasks to do @atomicRmw exchanges on
         //       the highlight lines. This function should then just push these necessary tasks to the thread
@@ -499,6 +499,7 @@ pub const TreeSitter = struct {
             try new_highlights.append(hls);
         }
         std.log.err("New HL count: {d}", .{new_highlights.items.len});
+        self.tree = try self.parser.parse(self.tree, input);
         const root = self.tree.?.rootNodeWithOffset(0, .{
             .row = 0,
             .column = 0,

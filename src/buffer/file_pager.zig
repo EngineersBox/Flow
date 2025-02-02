@@ -12,12 +12,13 @@ pub const MmapPager: type = struct {
     pub const MaxFileSize: u64 = 8 * 1024 * 1024 * 1024; // 8 GB
     pub const PageSize: u64 = std.mem.page_size;
 
-    ptr: []align(std.mem.page_size) u8,
+    raw_ptr: *anyopaque,
+    ptr: [*]align(std.mem.page_size) u8,
     len: u64,
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
-    pub fn init(allocator: *std.mem.Allocator, fd: std.os.fd_t) !MmapPager {
-        const stats = try std.os.fstat(fd);
+    pub fn init(allocator: std.mem.Allocator, fd: std.fs.File) !MmapPager {
+        const stats = try fd.stat();
         if (stats.size > MaxFileSize) {
             return error.FileTooLarge;
         }
@@ -26,16 +27,26 @@ pub const MmapPager: type = struct {
 
         // Create a contiguous virtual address space over the file
         // with space for expansion
-        const ptr = try std.os.mmap(null, MaxFileSize, std.os.PROT_READ | std.os.PROT_WRITE, std.os.MAP_SHARED, fd, 0);
+        const ptr = std.c.mmap(
+            null,
+            MaxFileSize,
+            std.c.PROT.READ | std.c.PROT.EXEC,
+            std.c.MAP{
+                .TYPE = .SHARED,
+            },
+            fd.handle,
+            0,
+        );
         return .{
-            .ptr = ptr,
+            .raw_ptr = ptr,
+            .ptr = @as([*]align(std.mem.page_size) u8, @ptrCast(@alignCast(ptr))),
             .len = @as(u64, stats.size),
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *MmapPager) void {
-        std.os.munmap(self.ptr);
+        _ = std.c.munmap(@alignCast(self.raw_ptr), self.len);
         self.ptr = undefined;
         self.len = 0;
     }
@@ -67,7 +78,7 @@ pub const MmapPager: type = struct {
         }
         for (buf) |b| {
             if (b & 1 == 0) {
-                try std.os.madvise(@as([*]u8, start), size, std.os.MADV_WILLNEED);
+                try std.os.madvise(@as([*]u8, start), size, std.c.MADV.WILLNEED);
                 return null; // not all in memory
             }
         }
@@ -83,9 +94,9 @@ pub const MmapPager: type = struct {
     }
 
     pub fn sync(self: *MmapPager) !void {
-        const rc: c_int = std.c.msync(&self.ptr[0], self.ptr.len, std.c.MS_SYNC);
+        const rc: c_int = std.c.msync(self.ptr, self.len, 0);
         if (rc != 0) {
-            return @errorFromInt(@as(u16, std.os.errno(rc)));
+            return error.MsyncFailed;
         }
     }
 };

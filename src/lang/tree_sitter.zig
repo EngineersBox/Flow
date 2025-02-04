@@ -1,5 +1,5 @@
 const std = @import("std");
-const zts = @import("zts");
+const ts = @import("tree-sitter");
 const vaxis = @import("vaxis");
 const json = @import("json");
 const Pool = @import("zap");
@@ -17,25 +17,26 @@ const Range = _ranges.Range;
 const ConcurrentArrayList = @import("../containers/concurrent_array_list.zig").ConcurrentArrayList;
 const ConcurrentStringHashMap = @import("../containers/concurrent_string_hash_map.zig").ConcurrentStringHashMap;
 const ConcurrentArrayHashMap = @import("../containers/concurrent_array_hash_map.zig").ConcurrentArrayHashMap;
+const lang = @import("lang.zig");
 
 pub const TreeIterator = struct {
-    cursor: zts.TreeCursor,
+    cursor: ts.TreeCursor,
     vistied_children: bool,
     yielded: bool,
 
-    pub fn init(node: zts.Node) TreeIterator {
+    pub fn init(node: ts.Node) TreeIterator {
         return .{
-            .cursor = zts.TreeCursor.init(node),
+            .cursor = node.walk(),
             .vistied_children = false,
             .yielded = false,
         };
     }
 
     pub fn deinit(self: *@This()) void {
-        self.cursor.deinit();
+        self.cursor.destroy();
     }
 
-    pub fn next(self: *@This()) ?zts.Node {
+    pub fn next(self: *@This()) ?ts.Node {
         while (true) {
             if (self.yielded) {
                 self.yielded = false;
@@ -46,7 +47,7 @@ pub const TreeIterator = struct {
             }
             if (!self.vistied_children) {
                 self.yielded = true;
-                return self.cursor.currentNode();
+                return self.cursor.node();
             } else if (self.cursor.gotoNextSibling()) {
                 self.vistied_children = false;
             } else if (!self.cursor.gotoParent()) {
@@ -57,78 +58,78 @@ pub const TreeIterator = struct {
     }
 };
 
-const file_extension_languages = std.StaticStringMap(zts.LanguageGrammar).initComptime(.{
-    .{ "sh", zts.LanguageGrammar.bash },
-    .{ "c", zts.LanguageGrammar.c },
-    .{ "h", zts.LanguageGrammar.c },
-    .{ "css", zts.LanguageGrammar.css },
-    .{ "cpp", zts.LanguageGrammar.cpp },
-    .{ "c++", zts.LanguageGrammar.cpp },
-    .{ "cc", zts.LanguageGrammar.cpp },
-    .{ "hpp", zts.LanguageGrammar.cpp },
-    .{ "h++", zts.LanguageGrammar.cpp },
-    .{ "cs", zts.LanguageGrammar.c_sharp },
-    .{ "ex", zts.LanguageGrammar.elixir },
-    .{ "exs", zts.LanguageGrammar.elixir },
-    .{ "elm", zts.LanguageGrammar.elm },
-    .{ "erl", zts.LanguageGrammar.erlang },
-    .{ "hrl", zts.LanguageGrammar.erlang },
-    .{ "fs", zts.LanguageGrammar.fsharp },
-    .{ "fsi", zts.LanguageGrammar.fsharp },
-    .{ "fsx", zts.LanguageGrammar.fsharp },
-    .{ "fsscript", zts.LanguageGrammar.fsharp },
-    .{ "go", zts.LanguageGrammar.go },
-    .{ "hs", zts.LanguageGrammar.haskell },
-    .{ "lhs", zts.LanguageGrammar.haskell },
-    .{ "java", zts.LanguageGrammar.java },
-    .{ "js", zts.LanguageGrammar.javascript },
-    .{ "cjs", zts.LanguageGrammar.javascript },
-    .{ "mjs", zts.LanguageGrammar.javascript },
-    .{ "jsx", zts.LanguageGrammar.javascript },
-    .{ "json", zts.LanguageGrammar.json },
-    .{ "jl", zts.LanguageGrammar.julia },
-    .{ "kt", zts.LanguageGrammar.kotlin },
-    .{ "kts", zts.LanguageGrammar.kotlin },
-    .{ "kexe", zts.LanguageGrammar.kotlin },
-    .{ "klib", zts.LanguageGrammar.kotlin },
-    .{ "lua", zts.LanguageGrammar.lua },
-    .{ "md", zts.LanguageGrammar.markdown },
-    .{ "nim", zts.LanguageGrammar.nim },
-    .{ "nims", zts.LanguageGrammar.nim },
-    .{ "nimble", zts.LanguageGrammar.nim },
-    .{ "ml", zts.LanguageGrammar.ocaml },
-    .{ "mli", zts.LanguageGrammar.ocaml },
-    .{ "perl", zts.LanguageGrammar.perl },
-    .{ "plx", zts.LanguageGrammar.perl },
-    .{ "pls", zts.LanguageGrammar.perl },
-    .{ "pl", zts.LanguageGrammar.perl },
-    .{ "pm", zts.LanguageGrammar.perl },
-    .{ "xs", zts.LanguageGrammar.perl },
-    .{ "t", zts.LanguageGrammar.perl },
-    .{ "pod", zts.LanguageGrammar.perl },
-    .{ "cgi", zts.LanguageGrammar.perl },
-    .{ "psgi", zts.LanguageGrammar.perl },
-    .{ "php", zts.LanguageGrammar.php },
-    .{ "py", zts.LanguageGrammar.python },
-    .{ "pyc", zts.LanguageGrammar.python },
-    .{ "rb", zts.LanguageGrammar.ruby },
-    .{ "rs", zts.LanguageGrammar.rust },
-    .{ "scala", zts.LanguageGrammar.scala },
-    .{ "sc", zts.LanguageGrammar.scala },
-    .{ "toml", zts.LanguageGrammar.toml },
-    .{ "ts", zts.LanguageGrammar.typescript },
-    .{ "tsx", zts.LanguageGrammar.typescript },
-    .{ "zig", zts.LanguageGrammar.zig },
-    .{ "zon", zts.LanguageGrammar.zig },
+const file_extension_languages = std.StaticStringMap(lang.LanguageGrammar).initComptime(.{
+    // .{ "sh", lang.LanguageGrammar.bash },
+    // .{ "c", lang.LanguageGrammar.c },
+    // .{ "h", lang.LanguageGrammar.c },
+    // .{ "css", lang.LanguageGrammar.css },
+    // .{ "cpp", lang.LanguageGrammar.cpp },
+    // .{ "c++", lang.LanguageGrammar.cpp },
+    // .{ "cc", lang.LanguageGrammar.cpp },
+    // .{ "hpp", lang.LanguageGrammar.cpp },
+    // .{ "h++", lang.LanguageGrammar.cpp },
+    // .{ "cs", lang.LanguageGrammar.c_sharp },
+    // .{ "ex", lang.LanguageGrammar.elixir },
+    // .{ "exs", lang.LanguageGrammar.elixir },
+    // .{ "elm", lang.LanguageGrammar.elm },
+    // .{ "erl", lang.LanguageGrammar.erlang },
+    // .{ "hrl", lang.LanguageGrammar.erlang },
+    // .{ "fs", lang.LanguageGrammar.fsharp },
+    // .{ "fsi", lang.LanguageGrammar.fsharp },
+    // .{ "fsx", lang.LanguageGrammar.fsharp },
+    // .{ "fsscript", lang.LanguageGrammar.fsharp },
+    // .{ "go", lang.LanguageGrammar.go },
+    // .{ "hs", lang.LanguageGrammar.haskell },
+    // .{ "lhs", lang.LanguageGrammar.haskell },
+    // .{ "java", lang.LanguageGrammar.java },
+    // .{ "js", lang.LanguageGrammar.javascript },
+    // .{ "cjs", lang.LanguageGrammar.javascript },
+    // .{ "mjs", lang.LanguageGrammar.javascript },
+    // .{ "jsx", lang.LanguageGrammar.javascript },
+    // .{ "json", lang.LanguageGrammar.json },
+    // .{ "jl", lang.LanguageGrammar.julia },
+    // .{ "kt", lang.LanguageGrammar.kotlin },
+    // .{ "kts", lang.LanguageGrammar.kotlin },
+    // .{ "kexe", lang.LanguageGrammar.kotlin },
+    // .{ "klib", lang.LanguageGrammar.kotlin },
+    // .{ "lua", lang.LanguageGrammar.lua },
+    // .{ "md", lang.LanguageGrammar.markdown },
+    // .{ "nim", lang.LanguageGrammar.nim },
+    // .{ "nims", lang.LanguageGrammar.nim },
+    // .{ "nimble", lang.LanguageGrammar.nim },
+    // .{ "ml", lang.LanguageGrammar.ocaml },
+    // .{ "mli", lang.LanguageGrammar.ocaml },
+    // .{ "perl", lang.LanguageGrammar.perl },
+    // .{ "plx", lang.LanguageGrammar.perl },
+    // .{ "pls", lang.LanguageGrammar.perl },
+    // .{ "pl", lang.LanguageGrammar.perl },
+    // .{ "pm", lang.LanguageGrammar.perl },
+    // .{ "xs", lang.LanguageGrammar.perl },
+    // .{ "t", lang.LanguageGrammar.perl },
+    // .{ "pod", lang.LanguageGrammar.perl },
+    // .{ "cgi", lang.LanguageGrammar.perl },
+    // .{ "psgi", lang.LanguageGrammar.perl },
+    // .{ "php", lang.LanguageGrammar.php },
+    // .{ "py", lang.LanguageGrammar.python },
+    // .{ "pyc", lang.LanguageGrammar.python },
+    // .{ "rb", lang.LanguageGrammar.ruby },
+    // .{ "rs", lang.LanguageGrammar.rust },
+    // .{ "scala", lang.LanguageGrammar.scala },
+    // .{ "sc", lang.LanguageGrammar.scala },
+    // .{ "toml", lang.LanguageGrammar.toml },
+    // .{ "ts", lang.LanguageGrammar.typescript },
+    // .{ "tsx", lang.LanguageGrammar.typescript },
+    .{ "zig", lang.LanguageGrammar.zig },
+    .{ "zon", lang.LanguageGrammar.zig },
 });
 
-fn loadGrammar(grammar: zts.LanguageGrammar) !*const zts.Language {
-    inline for (@typeInfo(zts.LanguageGrammar).Enum.fields) |field| {
+fn loadGrammar(grammar: lang.LanguageGrammar) !*const ts.Language {
+    inline for (@typeInfo(lang.LanguageGrammar).Enum.fields) |field| {
         // NOTE: With `inline for` the function gets generated as
         //       a series of `if` statements relying on the optimizer
         //       to convert it to a switch.
         if (field.value == @intFromEnum(grammar)) {
-            return try zts.loadLanguage(@as(zts.LanguageGrammar, @enumFromInt(field.value)));
+            return try lang.loadLanguage(@as(lang.LanguageGrammar, @enumFromInt(field.value)));
         }
     }
     // NOTE: When using `inline for` the compiler doesn't know that every
@@ -136,7 +137,7 @@ fn loadGrammar(grammar: zts.LanguageGrammar) !*const zts.Language {
     unreachable;
 }
 
-fn loadHighlightQueries(allocator: std.mem.Allocator, grammar: zts.LanguageGrammar) !Queries {
+fn loadHighlightQueries(allocator: std.mem.Allocator, grammar: lang.LanguageGrammar) !Queries {
     const config_dir_path = try known_folders.getPath(allocator, known_folders.KnownFolder.roaming_configuration) orelse return error.NoDotConfigDirectory;
     defer allocator.free(config_dir_path);
     const full_path = try std.fmt.allocPrint(allocator, "{s}{s}{s}/highlights.scm", .{ config_dir_path, TREE_SITTER_QUERIES_PATH, @tagName(grammar) });
@@ -243,14 +244,14 @@ const QueryTask = struct {
     wg: *std.Thread.WaitGroup,
     allocator: std.mem.Allocator,
     queries: *const Queries,
-    language: *const zts.Language,
+    language: *const ts.Language,
     config: *const Config,
     highlights: *LineQueryHighlights,
     highlight_indices: *ThreadHighlights,
     lines: *std.ArrayList(std.ArrayList(u8)),
     line_range: Range,
     buffer_size: usize,
-    root: zts.Node,
+    root: ts.Node,
 
     fn callback(task: *Pool.Task) void {
         const self: *@This() = @alignCast(@fieldParentPtr("task", task));
@@ -260,42 +261,45 @@ const QueryTask = struct {
         for (idx_start..idx_end) |i| {
             const query_string = self.queries.elems.keys()[i];
             var tags = self.queries.elems.get(query_string);
-            var query = zts.Query.init(self.language, query_string.items) catch {
-                std.log.err("Failed to init query", .{});
+            var error_offset: u32 = 0;
+            var query = ts.Query.create(self.language, query_string.items, &error_offset) catch |err| {
+                std.log.err("Failed to init query. Error at {d}: {s}", .{ error_offset, @errorName(err) });
                 continue;
             };
-            defer query.deinit();
-            _ = query.captureCount();
-            _ = query.stringCount();
-            _ = query.patternCount();
+            defer query.destroy();
             _ = query.startByteForPattern(0);
             _ = query.endByteForPattern(@intCast(query_string.items.len));
-            var cursor = zts.QueryCursor.init() catch {
-                std.log.err("Failed to init query cursor", .{});
-                continue;
+            var cursor = ts.QueryCursor.create();
+            defer cursor.destroy();
+            cursor.setByteRange(0, @intCast(self.buffer_size)) catch {
+                std.log.err("Failed to set cursor byte range: {d} to {d}", .{ 0, self.buffer_size });
+                return;
             };
-            defer cursor.deinit();
-            cursor.exec(query, self.root);
-            cursor.setByteRange(0, @intCast(self.buffer_size));
             cursor.setPointRange(
                 .{ .row = @intCast(self.line_range.start), .column = 0 },
                 .{ .row = @intCast(self.line_range.end + 1), .column = 0 },
-            );
-            var match: zts.QueryMatch = undefined;
-            while (true) {
-                if (!cursor.nextMatch(&match)) {
-                    break;
-                }
-                const captures: [*]const zts.QueryCapture = @ptrCast(match.captures);
-                for (0..match.capture_count) |j| {
-                    const node = captures[j].node;
-                    self.storeHighlight(query_string.items, &tags, node) catch |err| {
+            ) catch {
+                std.log.err(
+                    "Failed to set cursor point range: ({d},{d}) to ({d},{d})",
+                    .{
+                        self.line_range.start,
+                        0,
+                        self.line_range.end + 1,
+                        0,
+                    },
+                );
+                return;
+            };
+            cursor.exec(query, self.root);
+            while (cursor.nextMatch()) |match| {
+                for (match.captures, 0..) |capture, j| {
+                    self.storeHighlight(query_string.items, &tags, capture.node) catch |err| {
                         std.log.err(
                             "Failed to store highlight: {s} :: [Column: {d}] [Line: {d}] [Query: {s}] [Capture: {d}]",
                             .{
                                 @errorName(err),
-                                node.getStartPoint().column,
-                                node.getStartPoint().row,
+                                capture.node.startPoint().column,
+                                capture.node.startPoint().row,
                                 query_string.items,
                                 j,
                             },
@@ -307,9 +311,9 @@ const QueryTask = struct {
         }
     }
 
-    fn storeHighlight(self: *@This(), query_string: []const u8, tags: *?Tags, node: zts.Node) !void {
-        const start = node.getStartPoint();
-        const end = node.getEndPoint();
+    fn storeHighlight(self: *@This(), query_string: []const u8, tags: *?Tags, node: ts.Node) !void {
+        const start = node.startPoint();
+        const end = node.endPoint();
         var style: vaxis.Style = .{};
         var tag: ?Tag = null;
         if (tags.* != null and tags.*.?.items.len > 0) {
@@ -375,9 +379,9 @@ const QueryTask = struct {
 pub const TreeSitter = struct {
     allocator: std.mem.Allocator,
     config: Config,
-    language: *const zts.Language,
-    parser: *zts.Parser,
-    tree: ?*zts.Tree,
+    language: *const ts.Language,
+    parser: *ts.Parser,
+    tree: ?*ts.Tree,
     queries: Queries,
     per_thread_highlights: []ThreadHighlights,
     highlights: LineQueryHighlights,
@@ -389,7 +393,7 @@ pub const TreeSitter = struct {
         config: Config,
         extension: []const u8,
     ) !?TreeSitter {
-        const grammar: zts.LanguageGrammar = file_extension_languages.get(extension) orelse {
+        const grammar: lang.LanguageGrammar = file_extension_languages.get(extension) orelse {
             return null;
         };
         return try TreeSitter.init(allocator, config, try loadGrammar(grammar), grammar);
@@ -398,10 +402,10 @@ pub const TreeSitter = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         config: Config,
-        language: *const zts.Language,
-        grammar: zts.LanguageGrammar,
+        language: *const ts.Language,
+        grammar: lang.LanguageGrammar,
     ) !TreeSitter {
-        const parser = try zts.Parser.init();
+        const parser = ts.Parser.create();
         try parser.setLanguage(language);
         var queries = try loadHighlightQueries(allocator, grammar);
         const query_count: usize = @intCast(queries.elems.count());
@@ -423,7 +427,7 @@ pub const TreeSitter = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        self.parser.deinit();
+        self.parser.destroy();
         self.queries.deinit();
         self.allocator.free(self.per_thread_highlights);
         self.render_thread_pool.deinit();
@@ -446,7 +450,7 @@ pub const TreeSitter = struct {
     }
 
     pub fn parseBuffer(self: *@This(), buffer: []const u8, lines: *std.ArrayList(std.ArrayList(u8))) !void {
-        self.tree = try self.parser.parseString(self.tree, buffer);
+        self.tree = self.parser.parseString(buffer, self.tree) orelse return error.FailedReparse;
         for (self.highlights.items) |*hls| {
             var iter = hls.*.iterator();
             while (iter.next()) |entry| {
@@ -494,18 +498,21 @@ pub const TreeSitter = struct {
         }
     }
 
+    fn dummyProgressCallback(_: ts.Parser.State) callconv(.C) bool {
+        return true;
+    }
+
     pub fn reprocessRange(
         self: *@This(),
         modified_range_len: usize,
         lines: *std.ArrayList(std.ArrayList(u8)),
         range: Range,
-        input: zts.Input,
+        input: ts.Input,
     ) !void {
         // TODO: Should have a fixed set of threads that each have a queue of tasks to pull from and perform.
         //       A single thread should be responsible for HighlightUpdateTasks to do @atomicRmw exchanges on
         //       the highlight lines. This function should then just push these necessary tasks to the thread
         //       queues.
-        std.log.err("Range {d}-{d}", .{ range.start, range.end + 1 });
         const new_highlights: *LineQueryHighlights = try self.allocator.create(LineQueryHighlights);
         new_highlights.* = LineQueryHighlights.init(self.allocator);
         for (range.start..range.end + 1) |_| {
@@ -514,7 +521,17 @@ pub const TreeSitter = struct {
             try new_highlights.append(hls);
         }
         std.log.err("New HL count: {d}", .{new_highlights.items.len});
-        self.tree = try self.parser.parse(self.tree, input);
+        // NOTE: This is temporary as the Parser.parse method doesn't match the C
+        //       function parameters (extra null for some reason).
+        self.tree = self.parser.parseWithOptions(
+            input,
+            self.tree,
+            .{
+                .payload = null,
+                .progress_callback = TreeSitter.dummyProgressCallback,
+            },
+        ) orelse return error.FailedReparse;
+        // self.tree = self.parser.parse(input, self.tree) orelse return error.FailedReparse;
         const root = self.tree.?.rootNodeWithOffset(0, .{
             .row = 0,
             .column = 0,

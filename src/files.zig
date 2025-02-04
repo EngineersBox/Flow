@@ -11,7 +11,7 @@ pub fn cwdName(allocator: std.mem.Allocator) ![]const u8 {
         return cwd_path;
     }
     defer allocator.free(cwd_path);
-    const name = try allocator.alloc(u8, cwd_path.len - last_sep_index.?);
+    const name = try allocator.alloc(u8, cwd_path.len - (last_sep_index.? + 1));
     @memcpy(name, cwd_path[last_sep_index.? + 1 ..]);
     return name;
 }
@@ -31,11 +31,11 @@ pub fn lastPathElement(path: []const u8) []const u8 {
     return path[last_sep_index.? + 1 ..];
 }
 
-/// Computes the equivalent temp file for a file
+/// Computes the equivalent temp dir for a file
 /// being edited.
 ///
 /// Caller is responsible for freeing returned slice
-pub fn tempFilePath(allocator: std.mem.Allocator, file_path: []const u8) ![]const u8 {
+pub fn tempDirPath(allocator: std.mem.Allocator, file_path: []const u8) ![]const u8 {
     const cwd_relative_path = try subPathRelativeToCwd(allocator, file_path);
     const cwd_name = try cwdName(allocator);
     defer allocator.free(cwd_name);
@@ -54,10 +54,20 @@ pub fn tempFilePath(allocator: std.mem.Allocator, file_path: []const u8) ![]cons
         known_folders.KnownFolder.cache,
         .{},
     ) orelse return error.NoCacheDirectory;
-    try cache_dir.makePath(project_directories);
-    return try std.fmt.allocPrint(
+    const cache_path = try known_folders.getPath(
         allocator,
-        "{s}" ++ PATH_SEP ++ "{s}",
-        .{ cwd_name, cwd_relative_path },
+        known_folders.KnownFolder.cache,
     );
+    defer allocator.free(cache_path.?);
+    const path = try std.fmt.allocPrint(
+        allocator,
+        "{s}" ++ PATH_SEP ++ "{s}" ++ PATH_SEP ++ "{s}",
+        .{
+            cache_path.?,
+            cwd_name,
+            cwd_relative_path,
+        },
+    );
+    try cache_dir.makePath(path);
+    return path;
 }

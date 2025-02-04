@@ -1,6 +1,6 @@
 const std = @import("std");
 const vaxis = @import("vaxis");
-const zts = @import("zts");
+const ts = @import("tree-sitter");
 
 const Event = @import("event.zig").Event;
 const colours = @import("colours.zig");
@@ -281,8 +281,8 @@ pub const Flow = struct {
         if (self.active_window == null or self.active_window.?.buffer == null or self.active_window.?.buffer.?.tree_sitter == null) {
             return;
         }
-        const ts = &self.active_window.?.buffer.?.tree_sitter.?;
-        const target_node = ts.tree.?.rootNode().getDescendantForPointRange(
+        const tree_sitter = &self.active_window.?.buffer.?.tree_sitter.?;
+        const target_node = tree_sitter.tree.?.rootNode().descendantForPointRange(
             .{
                 .column = @intCast(new_cursor.col),
                 .row = @intCast(new_cursor.line),
@@ -305,28 +305,28 @@ pub const Flow = struct {
             return;
         }
         std.log.err("Found node @ ({d},{d}) to ({d},{d}) AKA {d} to {d}", .{
-            target_node.?.getStartPoint().column,
-            target_node.?.getStartPoint().row,
-            target_node.?.getEndPoint().column,
-            target_node.?.getEndPoint().row,
-            target_node.?.getStartByte(),
-            target_node.?.getEndByte(),
+            target_node.?.startPoint().column,
+            target_node.?.startPoint().row,
+            target_node.?.endPoint().column,
+            target_node.?.endPoint().row,
+            target_node.?.startByte(),
+            target_node.?.endByte(),
         });
         // TODO: Handle the case when we delete the last char in a node
-        const end_point = target_node.?.getEndPoint();
-        const end_byte = target_node.?.getEndByte();
-        const edit = zts.InputEdit{
-            .start_point = target_node.?.getStartPoint(),
+        const end_point = target_node.?.endPoint();
+        const end_byte = target_node.?.endByte();
+        const edit = ts.InputEdit{
+            .start_point = target_node.?.startPoint(),
             .old_end_point = end_point,
             .new_end_point = .{
                 .column = end_point.column - 1,
                 .row = end_point.row,
             },
-            .start_byte = target_node.?.getStartByte(),
+            .start_byte = target_node.?.startByte(),
             .old_end_byte = end_byte,
             .new_end_byte = end_byte - 1,
         };
-        ts.tree.?.edit(&edit);
+        tree_sitter.tree.?.edit(edit);
         try self.active_window.?.buffer.?.reprocessRange(.{
             .start = @min(new_cursor.line, previous_cursor.line),
             .end = @max(new_cursor.line, previous_cursor.line),
@@ -372,8 +372,8 @@ pub const Flow = struct {
                     return;
                 }
                 // Forward delete
-                if (self.active_window.?.buffer.?.tree_sitter) |*ts| {
-                    const edit = zts.InputEdit{
+                if (self.active_window.?.buffer.?.tree_sitter) |*tree_sitter| {
+                    const edit = ts.InputEdit{
                         .start_point = .{
                             .column = @intCast(self.vx.screen.cursor_col),
                             .row = @intCast(self.active_window.?.ranges.?.lines.start + self.vx.screen.cursor_row),
@@ -390,7 +390,7 @@ pub const Flow = struct {
                             .row = @intCast(self.active_window.?.ranges.?.lines.start + self.vx.screen.cursor_row),
                         },
                     };
-                    ts.tree.?.edit(&edit);
+                    tree_sitter.tree.?.edit(edit);
                 }
                 try self.active_window.?.buffer.?.delete(self.cursor_offset, 1, &self.active_window.?.ranges.?);
                 const line: *Line = self.getCurrentLine();

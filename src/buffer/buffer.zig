@@ -1,7 +1,7 @@
 const std = @import("std");
 const PieceTable = @import("piecetable").PieceTable;
 const known_folders = @import("known-folders");
-const zts = @import("zts");
+const ts = @import("tree-sitter");
 
 const TreeSitter = @import("../lang/tree_sitter.zig").TreeSitter;
 const _range = @import("../window/range.zig");
@@ -22,23 +22,27 @@ pub const TempFile = struct {
     pager: MmapPager,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !@This() {
-        const temp_file_path = try Files.tempFilePath(allocator, file_path);
-        errdefer allocator.free(temp_file_path);
-        const cache_dir = try known_folders.open(
+        const temp_dir_path = try Files.tempDirPath(allocator, file_path);
+        defer allocator.free(temp_dir_path);
+        const temp_file_path = try std.fmt.allocPrint(
             allocator,
-            known_folders.KnownFolder.cache,
-            .{},
-        ) orelse return error.NoCacheDirectory;
-        const temp_file_exists = blk: {
-            _ = cache_dir.statFile(temp_file_path) catch break :blk false;
-            break :blk true;
-        };
-        if (temp_file_exists) {
+            "{s}" ++ Files.PATH_SEP ++ "{s}",
+            .{
+                if (temp_dir_path[temp_dir_path.len -| 1] == Files.PATH_SEP[0])
+                    temp_dir_path[0..temp_dir_path.len -| 1]
+                else
+                    temp_dir_path,
+                Files.lastPathElement(file_path),
+            },
+        );
+        var file: std.fs.File = undefined;
+        if (std.fs.openFileAbsolute(temp_file_path, .{ .mode = .read_only })) |existing_file| {
             // TODO: Ask user if they want to recover or not
-        } else {
+            file = existing_file;
+        } else |_| {
             try std.fs.copyFileAbsolute(file_path, temp_file_path, .{});
+            file = try std.fs.openFileAbsolute(temp_file_path, .{});
         }
-        const file = try std.fs.openFileAbsolute(temp_file_path, .{});
         return .{
             .allocator = allocator,
             .file_path = temp_file_path,
@@ -201,8 +205,8 @@ pub const Buffer = struct {
     }
 
     pub fn deinit(self: *@This()) void {
-        if (self.tree_sitter) |*ts| {
-            ts.*.deinit();
+        if (self.tree_sitter) |*tree| {
+            tree.*.deinit();
         }
         for (self.lines.items) |*line| {
             line.*.deinit();
@@ -599,7 +603,7 @@ pub const Buffer = struct {
     }
 
     pub fn reprocessRange(self: *@This(), line_range: Range) !void {
-        if (self.tree_sitter) |*ts| {
+        if (self.tree_sitter) |*tree| {
             var modified_range_size: usize = 0;
             for (line_range.start..line_range.end) |i| {
                 const line: *Line = &self.lines.items[i];
@@ -610,17 +614,21 @@ pub const Buffer = struct {
             //       spawned within the reprocessRange call. However, this is ok
             //       as we only need access to it within the lifetime of the
             //       reprocessRange call.
-            var return_buffer = [1]u8{0};
+            var return_buffer: [6]u8 = [1]u8{0} ** 6;
             var read_ctx = TSReadContext{
                 .piece_table = &self.piecetable,
                 .return_buffer = &return_buffer,
             };
-            const input = zts.Input{
+            const input = ts.Input{
                 .payload = @ptrCast(&read_ctx),
                 .read = treeSitterReadFromPieceTable,
-                .encoding = .utf8,
+                .encoding = .UTF_8,
+                .decode = null,
             };
-            try ts.*.reprocessRange(modified_range_size, &self.lines, line_range, input);
+            // FIXME:: For some reason this causes TS to error as it tries to
+            //         parse values returned from the input.read function as
+            //         UTF-16 despite being specified as UTF-8 in the encoding
+            try tree.*.reprocessRange(modified_range_size, &self.lines, line_range, input);
         }
     }
 
@@ -644,10 +652,11 @@ pub const Buffer = struct {
     }
 
     pub fn parseIntoTreeSitter(self: *@This()) !void {
-        if (self.tree_sitter == null) {
-            return;
+        std.log.err("Parsing TS", .{});
+        if (self.tree_sitter) |*tree| {
+            std.log.err("Parsing into TS", .{});
+            try tree.parseBuffer(self.file_buffer, &self.lines);
         }
-        try self.tree_sitter.?.parseBuffer(self.file_buffer, &self.lines);
     }
 
     pub fn save(self: *@This()) !void {
@@ -674,22 +683,22 @@ pub const Buffer = struct {
 
 const TSReadContext = struct {
     piece_table: *PieceTable,
-    return_buffer: *[1]u8,
+    return_buffer: *[6]u8,
 };
 
 fn treeSitterReadFromPieceTable(
-    payload: *anyopaque,
+    payload: ?*anyopaque,
     byte: u32,
-    _: zts.Point,
+    _: ts.Point,
     read_count: *u32,
-) callconv(.C) [*]const u8 {
-    const ctx: *TSReadContext = @ptrCast(@alignCast(payload));
+) callconv(.C) [*c]const u8 {
+    const ctx: *TSReadContext = @ptrCast(@alignCast(payload.?));
     if (ctx.piece_table.get(byte)) |char| {
-        read_count.* = 1;
         ctx.return_buffer[0] = char;
+        read_count.* = 1;
     } else |_| {
         read_count.* = 0;
         ctx.return_buffer[0] = 0;
     }
-    return ctx.return_buffer;
+    return @ptrCast(ctx.return_buffer);
 }

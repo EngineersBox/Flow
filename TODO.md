@@ -13,6 +13,7 @@
 * [ ] `RwLock` synchronisation over `QueryHighlights` map is a naive solution that needs better management. Maybe a segmented distributed map?
 * [ ] Modifiers don't change inserted character correctly
 * [ ] TS queries after edit (i.e. remove `@` from `@import`) still return old highlight tag despite updating tree
+* [ ] Reparsing TS tree with custom reader impl causes TS to attempt to parse read results as UTF-16 despite encoding being set to UTF-8 (e.g. panic contains: `???:?:?: 0x10a4aff28 in _ts_decode_utf16 (???)`)
 
 ## Implement
 

@@ -138,9 +138,9 @@ fn loadGrammar(grammar: lang.LanguageGrammar) !*const ts.Language {
 }
 
 fn loadHighlightQueries(allocator: std.mem.Allocator, grammar: lang.LanguageGrammar) !Queries {
-    const config_dir_path = try known_folders.getPath(allocator, known_folders.KnownFolder.roaming_configuration) orelse return error.NoDotConfigDirectory;
+    const config_dir_path: []const u8 = try known_folders.getPath(allocator, known_folders.KnownFolder.roaming_configuration) orelse return error.NoDotConfigDirectory;
     defer allocator.free(config_dir_path);
-    const full_path = try std.fmt.allocPrint(allocator, "{s}{s}{s}/highlights.scm", .{ config_dir_path, TREE_SITTER_QUERIES_PATH, @tagName(grammar) });
+    const full_path: []u8 = try std.fmt.allocPrint(allocator, "{s}{s}{s}/highlights.scm", .{ config_dir_path, TREE_SITTER_QUERIES_PATH, @tagName(grammar) });
     defer allocator.free(full_path);
     var hl_file: std.fs.File = undefined;
     if (std.fs.openFileAbsolute(full_path, .{ .mode = .read_only })) |file| {
@@ -203,28 +203,16 @@ const HighlightsUpdateTask = struct {
 
     fn callback(task: *Pool.Task) void {
         const self: *@This() = @alignCast(@fieldParentPtr("task", task));
-        std.log.err("Awaiting QueryTasks completion", .{});
         self.wg.wait();
-        std.log.err("Modifying range: {d}-{d}", .{ self.line_range.start, self.line_range.end });
         for (self.line_range.start..self.line_range.end + 1) |i| {
             const offset_index = i - self.line_range.start;
-            std.log.err("BEFORE {d}  [Old: {d}] [New: {d}]", .{
-                i,
-                @intFromPtr(self.old_highlights.items[i]),
-                @intFromPtr(self.new_highlights.items[offset_index]),
-            });
-            const old = @atomicRmw(
+            const old: *QueryHighlights = @atomicRmw(
                 *QueryHighlights,
                 &self.old_highlights.items[i],
                 std.builtin.AtomicRmwOp.Xchg,
                 self.new_highlights.items[offset_index],
                 std.builtin.AtomicOrder.acq_rel,
             );
-            std.log.err("AFTER {d} [Old: {d}] [New: {d}]", .{
-                i,
-                @intFromPtr(self.old_highlights.items[i]),
-                @intFromPtr(self.new_highlights.items[offset_index]),
-            });
             defer old.deinit();
             var iter = old.iterator();
             while (iter.next()) |entry| {
@@ -234,7 +222,6 @@ const HighlightsUpdateTask = struct {
         self.new_highlights.deinit();
         self.allocator.destroy(self.new_highlights);
         self.allocator.free(self.tasks);
-        std.log.err("Finished sync", .{});
         self.done = true;
     }
 };
@@ -256,20 +243,20 @@ const QueryTask = struct {
     fn callback(task: *Pool.Task) void {
         const self: *@This() = @alignCast(@fieldParentPtr("task", task));
         defer self.wg.finish();
-        const idx_start = self.highlight_indices.index;
+        const idx_start: usize = self.highlight_indices.index;
         const idx_end = idx_start + self.highlight_indices.count;
         for (idx_start..idx_end) |i| {
-            const query_string = self.queries.elems.keys()[i];
-            var tags = self.queries.elems.get(query_string);
+            const query_string: std.ArrayList(u8) = self.queries.elems.keys()[i];
+            var tags: ?Tags = self.queries.elems.get(query_string);
             var error_offset: u32 = 0;
-            var query = ts.Query.create(self.language, query_string.items, &error_offset) catch |err| {
+            var query: *ts.Query = ts.Query.create(self.language, query_string.items, &error_offset) catch |err| {
                 std.log.err("Failed to init query. Error at {d}: {s}", .{ error_offset, @errorName(err) });
                 continue;
             };
             defer query.destroy();
             _ = query.startByteForPattern(0);
             _ = query.endByteForPattern(@intCast(query_string.items.len));
-            var cursor = ts.QueryCursor.create();
+            var cursor: *ts.QueryCursor = ts.QueryCursor.create();
             defer cursor.destroy();
             cursor.setByteRange(0, @intCast(self.buffer_size)) catch {
                 std.log.err("Failed to set cursor byte range: {d} to {d}", .{ 0, self.buffer_size });
@@ -321,41 +308,26 @@ const QueryTask = struct {
             // std.log.err("HL Tag: {s}", .{tag.?.items});
             const theme_highlight = self.config.theme.get(tag.?.items);
             if (theme_highlight) |hl| {
-                std.log.err("Tag: {s} Highlight color: {d},{d},{d}", .{ tag.?.items, hl.colour.rgb[0], hl.colour.rgb[1], hl.colour.rgb[2] });
                 style.fg = hl.colour;
                 style.bold = hl.bold;
                 style.italic = hl.italic;
                 if (hl.underline) {
                     style.ul = hl.colour;
                 }
-            } else {
-                std.log.err("Tag: {s} No Color", .{tag.?.items});
             }
         }
         var query_highlights: *QueryHighlights = self.highlights.items[@intCast(start.row - self.line_range.start)];
         query_highlights.rwlock.lock();
         defer query_highlights.rwlock.unlock();
-        var highlights = query_highlights.map.get(query_string);
+        var highlights: ?*Highlights = query_highlights.map.get(query_string);
         if (highlights == null) {
             highlights = try self.allocator.create(Highlights);
             highlights.?.* = Highlights.init(self.allocator);
             try query_highlights.map.put(query_string, highlights.?);
         }
-        std.log.err(
-            "[HL] Tag: {s} Text: '{s}' Row: {d} Column: {d} Colour: ({d},{d},{d})",
-            .{
-                tag.?.items,
-                self.lines.items[start.row].items[start.column..end.column],
-                start.row,
-                start.column,
-                if (style.fg == .default) 0xFF else style.fg.rgb[0],
-                if (style.fg == .default) 0xFF else style.fg.rgb[1],
-                if (style.fg == .default) 0xFF else style.fg.rgb[2],
-            },
-        );
         highlights.?.rwlock.lock();
         defer highlights.?.rwlock.unlock();
-        const current_hl = highlights.?.map.get(start.column);
+        const current_hl: ?Highlight = highlights.?.map.get(start.column);
         if (current_hl != null and current_hl.?.segment.style.fg == .default) {
             return;
         }
@@ -405,9 +377,9 @@ pub const TreeSitter = struct {
         language: *const ts.Language,
         grammar: lang.LanguageGrammar,
     ) !TreeSitter {
-        const parser = ts.Parser.create();
+        const parser: *ts.Parser = ts.Parser.create();
         try parser.setLanguage(language);
-        var queries = try loadHighlightQueries(allocator, grammar);
+        var queries: Queries = try loadHighlightQueries(allocator, grammar);
         const query_count: usize = @intCast(queries.elems.count());
         const thread_count: usize = @min(query_count, std.Thread.getCpuCount() catch 1);
         const per_thread_highlights = try allocator.alloc(ThreadHighlights, thread_count);
@@ -467,13 +439,13 @@ pub const TreeSitter = struct {
             hl.* = QueryHighlights.init(self.allocator);
             try self.highlights.append(hl);
         }
-        const root = self.tree.?.rootNodeWithOffset(0, .{
+        const root: ts.Node = self.tree.?.rootNodeWithOffset(0, .{
             .row = 0,
             .column = 0,
         });
         const tasks: []QueryTask = try self.allocator.alloc(QueryTask, self.per_thread_highlights.len);
         defer self.allocator.free(tasks);
-        var wg = std.Thread.WaitGroup{};
+        var wg: std.Thread.WaitGroup = .{};
         defer wg.wait();
         for (tasks, 0..) |*task, i| {
             wg.start();
@@ -520,7 +492,6 @@ pub const TreeSitter = struct {
             hls.* = QueryHighlights.init(self.allocator);
             try new_highlights.append(hls);
         }
-        std.log.err("New HL count: {d}", .{new_highlights.items.len});
         // NOTE: This is temporary as the Parser.parse method doesn't match the C
         //       function parameters (extra null for some reason).
         self.tree = self.parser.parseWithOptions(
@@ -532,12 +503,12 @@ pub const TreeSitter = struct {
             },
         ) orelse return error.FailedReparse;
         // self.tree = self.parser.parse(input, self.tree) orelse return error.FailedReparse;
-        const root = self.tree.?.rootNodeWithOffset(0, .{
+        const root: ts.Node = self.tree.?.rootNodeWithOffset(0, .{
             .row = 0,
             .column = 0,
         });
         const tasks: []QueryTask = try self.allocator.alloc(QueryTask, self.per_thread_highlights.len);
-        var wg = try self.allocator.create(std.Thread.WaitGroup);
+        var wg: *std.Thread.WaitGroup = try self.allocator.create(std.Thread.WaitGroup);
         wg.* = .{};
         for (tasks, 0..) |*task, i| {
             wg.start();
@@ -581,12 +552,12 @@ pub const TreeSitter = struct {
                 var highlights: *Highlights = entry.value_ptr.*;
                 var hl_iter = highlights.iterator();
                 while (hl_iter.next()) |hl_entry| {
-                    const hl = hl_entry.value_ptr;
+                    const hl: *Highlight = hl_entry.value_ptr;
                     _ = try window.printSegment(hl.segment, hl.print_options);
                 }
             }
         }
-        var count = self.update_tasks.count();
+        var count: usize = self.update_tasks.count();
         while (count > 0) : (count -= 1) {
             if (self.update_tasks.popOrNull()) |task| {
                 if (task.done) {

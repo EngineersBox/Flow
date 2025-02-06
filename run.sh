@@ -8,6 +8,6 @@ if [ $TRUNC_LOG ]; then
     rm stderr.log || true
 fi
 
-zig build
+zig build $@
 zig-out/bin/Flow test_file.zig 2> stderr.log || true
 reset

@@ -39,5 +39,5 @@ pub const LanguageGrammar = enum {
 pub inline fn loadLanguage(comptime lg: LanguageGrammar) !*const ts.Language {
     const name = @tagName(lg);
     const c_func = @field(grammars, "tree_sitter_" ++ name);
-    return if (c_func()) |lang| @ptrCast(lang) else error.InvalidLang;
+    return if (c_func()) |lang| @ptrCast(lang) else error.InvalidLanguage;
 }

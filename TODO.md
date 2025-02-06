@@ -29,6 +29,7 @@
 * [X] Query tree sitter using language highlights SCM
 * [ ] Range based delete via visual mode
 * [ ] Configurable key maps
+* [ ] Insertion edits to tree sitter tree (i.e. adding a character and re-parsing)
 
 ## Refactor
 

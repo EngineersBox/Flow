@@ -74,10 +74,10 @@ pub const Flow = struct {
     needs_reparse: bool,
 
     pub fn init(allocator: std.mem.Allocator, file_path: []const u8) !Flow {
-        const config = try Config.init(allocator);
-        const tab_spaces_buffer = try allocator.alloc(u8, config.properties.value.spaces_per_tab);
+        const config: Config = try Config.init(allocator);
+        const tab_spaces_buffer: []u8 = try allocator.alloc(u8, config.properties.value.spaces_per_tab);
         @memset(tab_spaces_buffer, @as(u8, @intCast(' ')));
-        const buffer = try allocator.create(Buffer);
+        const buffer: *Buffer = try allocator.create(Buffer);
         buffer.* = try Buffer.initFromFile(allocator, config, file_path);
         return .{
             .allocator = allocator,
@@ -86,7 +86,7 @@ pub const Flow = struct {
             .should_quit = false,
             .tty = try vaxis.Tty.init(),
             .vx = try vaxis.init(allocator, .{}),
-            .mouse = null,
+            .mouse = null, // TODO: Create and handle mouse
             .buffer = buffer,
             .active_window = null,
             .mode = TextMode.NORMAL,
@@ -106,6 +106,7 @@ pub const Flow = struct {
             }
             window.deinit();
         }
+        self.buffer.deinit();
         self.allocator.free(self.tab_spaces_buffer);
         self.config.deinit();
     }
@@ -170,12 +171,12 @@ pub const Flow = struct {
         return self.active_window.?.getStartRelativeLine(self.vx.screen.cursor_row);
     }
 
-    inline fn confineCursorToCurrentLine(self: *@This(), clamp: ClampMode) void {
+    inline fn confineCursorToCurrentLine(self: *@This(), clamp_mode: ClampMode) void {
         const current_line_editable_end = switch (self.mode) {
             TextMode.INSERT => self.getCurrentLine().items.len -| 1,
             else => self.getCurrentLine().items.len -| 2,
         };
-        switch (clamp) {
+        switch (clamp_mode) {
             ClampMode.NONE => {
                 self.vx.screen.cursor_col = @min(self.vx.screen.cursor_col, current_line_editable_end);
             },
@@ -238,10 +239,10 @@ pub const Flow = struct {
     }
 
     fn adjustCursorOffset(self: *@This(), prev_row: usize, prev_col: usize) void {
-        const new_row = self.vx.screen.cursor_row;
-        const new_col = self.vx.screen.cursor_col;
-        const new_row_len = self.active_window.?.getStartRelativeLine(new_row).items.len;
-        const prev_row_len = self.active_window.?.getStartRelativeLine(prev_row).items.len;
+        const new_row: usize = self.vx.screen.cursor_row;
+        const new_col: usize = self.vx.screen.cursor_col;
+        const new_row_len: usize = self.active_window.?.getStartRelativeLine(new_row).items.len;
+        const prev_row_len: usize = self.active_window.?.getStartRelativeLine(prev_row).items.len;
         if (new_row > prev_row) {
             self.cursor_offset += (prev_row_len - prev_col) + new_col;
             return;
@@ -253,15 +254,15 @@ pub const Flow = struct {
         self.cursor_offset += new_col;
     }
 
-    fn shiftCursorRow(self: *@This(), offset_row: isize, clamp: ClampMode) !void {
+    fn shiftCursorRow(self: *@This(), offset_row: isize, clamp_mode: ClampMode) !void {
         var new_row: isize = @intCast(self.vx.screen.cursor_row);
         new_row += offset_row;
         if (new_row >= 0 and new_row < self.active_window.?.buffer.?.lines.items.len) {
             // Inside window
-            const prev_row = self.vx.screen.cursor_row;
-            const prev_col = self.vx.screen.cursor_col;
+            const prev_row: usize = self.vx.screen.cursor_row;
+            const prev_col: usize = self.vx.screen.cursor_col;
             self.vx.screen.cursor_row = @intCast(new_row);
-            self.confineCursorToCurrentLine(clamp);
+            self.confineCursorToCurrentLine(clamp_mode);
             self.adjustCursorOffset(prev_row, prev_col);
             return;
         }
@@ -270,19 +271,19 @@ pub const Flow = struct {
             // New window invalid, moved outside buffer bounds
             return;
         }
-        const prev_row = self.vx.screen.cursor_row;
-        const prev_col = self.vx.screen.cursor_col;
+        const prev_row: usize = self.vx.screen.cursor_row;
+        const prev_col: usize = self.vx.screen.cursor_col;
         self.vx.screen.cursor_row = @intCast(new_row);
-        self.confineCursorToCurrentLine(clamp);
+        self.confineCursorToCurrentLine(clamp_mode);
         self.adjustCursorOffset(prev_row, prev_col);
     }
 
-    fn deleteCharAtCursorInTS(self: *@This(), new_cursor: Position, previous_cursor: Position) !void {
+    fn modifyCharAtCursorInTS(self: *@This(), new_cursor: Position, previous_cursor: Position, comptime adjustment: isize) !void {
         if (self.active_window == null or self.active_window.?.buffer == null or self.active_window.?.buffer.?.tree_sitter == null) {
             return;
         }
-        const tree_sitter = &self.active_window.?.buffer.?.tree_sitter.?;
-        const target_node = tree_sitter.tree.?.rootNode().descendantForPointRange(
+        const tree_sitter: *TreeSitter = &self.active_window.?.buffer.?.tree_sitter.?;
+        const target_node: ?ts.Node = tree_sitter.tree.?.rootNode().descendantForPointRange(
             .{
                 .column = @intCast(new_cursor.col),
                 .row = @intCast(new_cursor.line),
@@ -304,27 +305,19 @@ pub const Flow = struct {
             );
             return;
         }
-        std.log.err("Found node @ ({d},{d}) to ({d},{d}) AKA {d} to {d}", .{
-            target_node.?.startPoint().column,
-            target_node.?.startPoint().row,
-            target_node.?.endPoint().column,
-            target_node.?.endPoint().row,
-            target_node.?.startByte(),
-            target_node.?.endByte(),
-        });
         // TODO: Handle the case when we delete the last char in a node
-        const end_point = target_node.?.endPoint();
-        const end_byte = target_node.?.endByte();
+        const end_point: ts.Point = target_node.?.endPoint();
+        const end_byte: u32 = target_node.?.endByte();
         const edit = ts.InputEdit{
             .start_point = target_node.?.startPoint(),
             .old_end_point = end_point,
             .new_end_point = .{
-                .column = end_point.column - 1,
+                .column = @intCast(@as(isize, @intCast(end_point.column)) + adjustment),
                 .row = end_point.row,
             },
             .start_byte = target_node.?.startByte(),
             .old_end_byte = end_byte,
-            .new_end_byte = end_byte - 1,
+            .new_end_byte = @intCast(@as(isize, @intCast(end_byte)) + adjustment),
         };
         tree_sitter.tree.?.edit(edit);
         try self.active_window.?.buffer.?.reprocessRange(.{
@@ -338,10 +331,6 @@ pub const Flow = struct {
         switch (key.codepoint) {
             vaxis.Key.enter => {
                 try self.active_window.?.buffer.?.insert(self.cursor_offset, "\n", &self.active_window.?.ranges.?);
-                // if (self.active_window.?.buffer.?.tree_sitter) |*ts| {
-                //     const edit = self.editForCursorPos();
-                //     ts.tree.?.edit(&edit);
-                // }
                 self.buffer.clearLines();
                 _ = try self.buffer.cacheLines();
                 // Move cursor to start of next row
@@ -357,6 +346,11 @@ pub const Flow = struct {
                 );
                 const line: *Line = self.getCurrentLine();
                 try line.insert(self.vx.screen.cursor_col, @intCast(key.codepoint));
+                const cursor_position: Position = .{
+                    .col = self.vx.screen.cursor_col,
+                    .line = self.vx.screen.cursor_row,
+                };
+                try self.modifyCharAtCursorInTS(cursor_position, cursor_position, 1);
                 try self.shiftCursorCol(1);
                 // self.buffer.clearLines();
                 // _ = try self.buffer.cacheLines();
@@ -372,26 +366,6 @@ pub const Flow = struct {
                     return;
                 }
                 // Forward delete
-                if (self.active_window.?.buffer.?.tree_sitter) |*tree_sitter| {
-                    const edit = ts.InputEdit{
-                        .start_point = .{
-                            .column = @intCast(self.vx.screen.cursor_col),
-                            .row = @intCast(self.active_window.?.ranges.?.lines.start + self.vx.screen.cursor_row),
-                        },
-                        .start_byte = @intCast(self.cursor_offset),
-                        .old_end_point = .{
-                            .column = @intCast(self.vx.screen.cursor_col + 1),
-                            .row = @intCast(self.active_window.?.ranges.?.lines.start - self.vx.screen.cursor_row),
-                        },
-                        .old_end_byte = @intCast(self.cursor_offset + 1),
-                        .new_end_byte = @intCast(self.cursor_offset),
-                        .new_end_point = .{
-                            .column = @intCast(self.vx.screen.cursor_col),
-                            .row = @intCast(self.active_window.?.ranges.?.lines.start + self.vx.screen.cursor_row),
-                        },
-                    };
-                    tree_sitter.tree.?.edit(edit);
-                }
                 try self.active_window.?.buffer.?.delete(self.cursor_offset, 1, &self.active_window.?.ranges.?);
                 const line: *Line = self.getCurrentLine();
                 if (line.items[line.items.len -| 1] != '\n' or self.vx.screen.cursor_col < line.items.len - 1) {
@@ -408,7 +382,19 @@ pub const Flow = struct {
                     defer next_line.deinit();
                     try current_line.appendSlice(next_line.items);
                 }
+                const previous_cursor: Position = .{
+                    .col = self.vx.screen.cursor_col,
+                    .line = self.vx.screen.cursor_row,
+                };
                 try self.shiftCursorCol(0);
+                const new_cursor: Position = .{
+                    .col = self.vx.screen.cursor_col,
+                    .line = self.vx.screen.cursor_row,
+                };
+                // Update TS after as we can rely on the cursor position
+                // position calculations to correctly remove the character
+                // at the start of end of a line
+                try self.modifyCharAtCursorInTS(new_cursor, previous_cursor, -1);
             },
             vaxis.Key.backspace => {
                 if (self.cursor_offset == 0) {
@@ -449,7 +435,7 @@ pub const Flow = struct {
                 // Update TS after as we can rely on the cursor position
                 // position calculations to correctly remove the character
                 // at the start of end of a line
-                try self.deleteCharAtCursorInTS(new_cursor, previous_cursor);
+                try self.modifyCharAtCursorInTS(new_cursor, previous_cursor, -1);
             },
             vaxis.Key.left => {
                 try self.shiftCursorCol(-1);
@@ -514,7 +500,7 @@ pub const Flow = struct {
                 if (self.active_window == null or self.active_window.?.buffer == null) {
                     return;
                 }
-                const start = if (self.active_window.?.ranges) |r| r.lines.start else 0;
+                const start: usize = if (self.active_window.?.ranges) |r| r.lines.start else 0;
                 self.active_window.?.ranges = try self.active_window.?.buffer.?.setBufferWindow(
                     start,
                     ws.rows,

@@ -35,6 +35,7 @@ pub const TempFile = struct {
                 Files.lastPathElement(file_path),
             },
         );
+        defer allocator.free(temp_file_path);
         var file: std.fs.File = undefined;
         if (std.fs.openFileAbsolute(temp_file_path, .{ .mode = .read_only })) |existing_file| {
             // TODO: Ask user if they want to recover or not

@@ -113,6 +113,7 @@ fn buildLanguageGrammar(
 }
 
 fn generateHeaderFile(b: *Build, g: Grammar, dep: *std.Build.Dependency) ![]const u8 {
+    // TODO: Detect if the dependency already has a header definition provided
     const path = dep.path("").getPath(b);
     const dir = try std.fs.openDirAbsolute(path, .{});
 

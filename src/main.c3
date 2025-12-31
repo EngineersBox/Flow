@@ -5,7 +5,7 @@ import piece_chain;
 fn int main(String[] args) {
     piece_chain::PieceChain pc = piece_chain::create("test.txt");
 	io::printn("Hello, World!");
-    isz bytes = piece_chain::size_bytes(pc);
+    usz bytes = piece_chain::size_bytes(pc);
     io::printf("Size: %d\n",bytes);
     piece_chain::PieceChainIterator iter = piece_chain::iter(pc, 0, bytes);
     ZString data = null;

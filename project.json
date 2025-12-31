@@ -11,7 +11,7 @@
     "c-include-dirs": [
         "external/PieceChain/include",
         "external/notcurses/include/notcurses",
-        "external/tree-sitter/include/tree_sitter"
+        "external/tree-sitter/lib/include/tree_sitter"
     ],
     "linked-libraries": [
         "PieceChain",

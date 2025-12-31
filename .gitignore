@@ -3,3 +3,4 @@
 stderr.log
 build/
 lib/**
+include/**

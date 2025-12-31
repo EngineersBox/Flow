@@ -8,18 +8,18 @@ fn void log(void* payload, tree_sitter::LogType log_type, ZString buffer) {
 }
 
 fn int main(String[] args) {
-    piece_chain::PieceChain pc = piece_chain::create("test.txt");
+    piece_chain::PieceChain* pc = piece_chain::create("test.txt");
 	io::printn("Hello, World!");
-    usz bytes = piece_chain::size_bytes(pc);
+    usz bytes = pc.size();
     io::printf("Size: %d\n",bytes);
-    piece_chain::PieceChainIterator iter = piece_chain::iter(pc, 0, bytes);
+    piece_chain::PieceChainIterator* iter = pc.iter(0, bytes);
     ZString data = null;
     usz len = 0;
-    while (piece_chain::iter_next(iter, &data, &len)) {
+    while (iter.next(&data, &len)) {
         io::printf("%s (%d)\n", data, len);
     }
-    piece_chain::iter_free(iter);
-    piece_chain::destroy(pc);
+    iter.free();
+    pc.destroy();
     tree_sitter::Parser* parser = tree_sitter::parser_new();
     parser.set_logger((tree_sitter::Logger) {
         .payload = null,

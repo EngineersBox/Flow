@@ -167,12 +167,119 @@ extern fn bool Parser.set_language(Parser* self, Language* language) @cname("ts_
 <* @param [&in] ranges *>
 extern fn bool Parser.set_included_ranges(Parser* self, Range* ranges, uint count) @cname("ts_parser_set_included_ranges");
 <* @param [&out] count *>
-extern fn Range Parser.get_included_ranges(Parser* self, uint* count) @cname("ts_parser_included_ranges");
+extern fn Range Parser.included_ranges(Parser* self, uint* count) @cname("ts_parser_included_ranges");
 
+<* @param [&in] old_tree *>
+extern fn Tree* Parser.parse(Parser* self, Tree* old_tree, Input input) @cname("ts_parser_parse");
+<* @param [&in] old_tree *>
+extern fn Tree* Parser.parse_with_options(Parser* self, Tree* old_tree, Input input, ParseOptions parse_options) @cname("ts_parse_parse_with_options");
 <*
  @param [&in] old_tree
  @param [&in] string
 *>
 extern fn Tree* Parser.parse_string(Parser* self, Tree* old_tree, ZString string, uint length) @cname("ts_parser_parse_string");
+<*
+ @param [&in] old_tree
+ @param [&in] string
+*>
+extern fn Tree* Parser.parse_string_encoding(Parser* self, Tree* old_tree, ZString string, uint length, InputEncoding encoding) @cname("ts_parser_parse_string_encoding");
+
+extern fn void Parser.reset(Parser* self);
 
 extern fn void Parser.set_logger(Parser* self, Logger logger) @cname("ts_parser_set_logger");
+<* @param [&in] self *>
+extern fn Logger Parser.logger(Parser* self);
+
+extern fn void Parser.print_dot_graphs(Parser* self, int fd) @cname("ts_parser_print_dot_graphs");
+
+<* @param [&in] self *>
+extern fn Tree* Tree.copy(Tree* self) @cname("ts_tree_copy");
+extern fn void Tree.delete(Tree* self) @cname("ts_tree_delete");
+
+<* @param [&in] self *>
+extern fn Node* Tree.root_node(Tree* self) @cname("ts_tree_root_node");
+<* @param [&in] self *>
+extern fn Node* Tree.root_node_with_offset(Tree* self, uint offset_bytes, Point offset_extent) @cname("ts_tree_root_node_with_offset");
+
+<* @param [&in] self *>
+extern fn Language* Tree.language(Tree* self) @cname("ts_tree_language");
+
+<*
+ @param [&in] self
+ @param [&out] length
+*>
+extern fn Range* Tree.included_ranges(Tree* self, uint* length) @cname("ts_tree_included_ranges");
+
+<* @param [&in] edit *>
+extern fn void Tree.edit(Tree* self, InputEdit* edit) @cname("ts_tree_edit");
+<*
+ @param [&in] self 
+ @param [&in] new_tree
+ @param [&out] length
+*>
+extern fn Range* Tree.get_changed_ranges(Tree* self, Tree* new_tree, uint* length) @cname("ts_tree_get_changed_ranges");
+
+<* @param [&in] self *>
+extern fn void Tree.print_dot_graph(Tree* self, int file_descriptor) @cname("ts_tree_print_dot_graph");
+
+extern fn ZString Node.type(Node self) @cname("ts_node_type");
+extern fn Symbol Node.symbol(Node self) @cname("ts_node_symbol");
+extern fn Language* Node.language(Node self) @cname("ts_node_language");
+extern fn ZString Node.grammar_type(Node self) @cname("ts_node_grammar_type");
+extern fn Symbol Node.grammar_symbol(Node self) @cname("ts_node_grammar_symbol");
+
+extern fn uint Node.start_byte(Node self) @cname("ts_node_start_byte");
+extern fn Point Node.start_point(Node self) @cname("ts_node_start_point");
+extern fn uint Node.end_byte(Node self) @cname("ts_node_end_byte");
+extern fn Point Node.end_point(Node self) @cname("ts_node_end_point");
+
+extern fn ZString Node.string(Node self) @cname("ts_node_string");
+
+extern fn bool Node.is_null(Node self) @cname("ts_node_is_null");
+extern fn bool Node.is_named(Node self) @cname("ts_node_is_named");
+extern fn bool Node.is_missing(Node self) @cname("ts_node_is_missing");
+extern fn bool Node.is_extra(Node self) @cname("ts_node_is_extra");
+extern fn bool Node.has_changes(Node self) @cname("ts_node_has_changes");
+extern fn bool Node.has_error(Node self) @cname("ts_node_has_error");
+extern fn bool Node.is_error(Node self) @cname("ts_node_is_error");
+
+extern fn StateId Node.parse_state(Node self) @cname("ts_node_parse_state");
+extern fn StateId Node.next_parse_state(Node self) @cname("ts_node_next_parse_state");
+
+extern fn Node Node.parent(Node self) @cname("ts_node_parent");
+extern fn Node Node.child_with_decendant(Node self, Node decendant) @cname("ts_node_child_with_decendant");
+extern fn Node Node.child(Node self, uint child_index) @cname("ts_node_child");
+
+extern fn ZString Node.field_name_for_named_child(Node self, uint named_child_index) @cname("ts_field_name_for_named_child");
+extern fn uint Node.child_count(Node self) @cname("ts_node_child_count");
+extern fn Node Node.named_child(Node self, uint child_index) @cname("ts_node_named_child");
+extern fn uint Node.named_child_count(Node self) @cname("ts_node_named_child_count");
+<* @param [&in] name *>
+extern fn Node Node.named_child_by_field_name(Node self, ZString name, uint name_length) @cname("ts_node_named_child_by_field_name");
+extern fn Node Node.named_child_by_field_id(Node self, FieldId field_id) @cname("ts_node_named_child_by_field_id");
+
+extern fn Node Node.next_sibling(Node self) @cname("ts_node_next_sibling");
+extern fn Node Node.prev_sibling(Node self) @cname("ts_node_prev_sibling");
+extern fn Node Node.next_named_sibling(Node self) @cname("ts_node_next_named_sibling");
+extern fn Node Node.prev_named_sibling(Node self) @cname("ts_node_prev_named_sibling");
+
+extern fn Node Node.first_child_for_byte(Node self, uint byte) @cname("ts_node_first_child_for_byte");
+extern fn Node Node.first_named_child_for_byte(Node self, uint byte) @cname("ts_node_first_named_child_for_byte");
+
+extern fn uint Node.decendant_count(Node self) @cname("ts_node_decendant_count");
+extern fn Node Node.decendant_for_byte_range(Node self, uint start, uint end) @cname("ts_node_decendant_for_byte_range");
+extern fn Node Node.decendant_for_point_range(Node self, Point start, Point end) @cname("ts_node_decendant_for_point_range");
+extern fn Node Node.named_decendant_for_byte_range(Node self, uint start, uint end) @cname("ts_node_named_decendant_for_byte_range");
+extern fn Node Node.named_decendant_for_point_range(Node self, Point start, Point end) @cname("ts_node_named_decendant_for_point_range");
+
+<* @param [&in] edit *>
+extern fn void Node.edit(Node* self, InputEdit* edit) @cname("ts_node_edit");
+extern fn bool Node.eq(Node self, Node other) @cname("ts_node_eq");
+
+<*
+ @param [&out] point_byte
+ @param [&in] edit
+*>
+extern fn void Point.edit(Point* self, uint* point_byte, InputEdit* edit) @cname("ts_point_edit");
+<* @param [&in] edit *>
+extern fn void Range.edit(Range* self, InputEdit* edit) @cname("ts_range_edit");

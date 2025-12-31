@@ -15,7 +15,7 @@ enum SaveMode : const CInt {
 }
 
 <* @param [&out] data *>
-alias Visitor = fn bool(PieceChain chain, usz offset, char* data, usz len, void* user);
+alias Visitor = fn bool(PieceChain chain, usz offset, ZString data, usz len, void* user);
 
 <* @param [&in] path *>
 extern fn PieceChain create(char* path) @cname("piece_chain_open");

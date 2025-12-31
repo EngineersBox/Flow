@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
-./build.sh
+OPERATION=${OPERATION:-"build"}
 
+echo "[INFO] Building executable"
+./build.sh "$OPERATION"
+
+echo "[INFO] Running executable"
 build/flow

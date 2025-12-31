@@ -7,12 +7,7 @@
     "version": "0.1.0",
     "sources": [ "src/**" ],
     "test-sources": [ "test/**" ],
-    "c-sources": [ "csrc/**" ],
-    "c-include-dirs": [
-        "external/PieceChain/include",
-        "external/notcurses/include/notcurses",
-        "external/tree-sitter/lib/include/tree_sitter"
-    ],
+    "c-include-dirs": [ "include/**", ],
     "linked-libraries": [
         "PieceChain",
         "notcurses",
@@ -20,9 +15,9 @@
         "tree-sitter"
     ],
     "linker-search-paths": [
-        "external/PieceChain/",
-        "external/notcurses/build/",
-        "external/tree-sitter/"
+        "lib/piece_chain/",
+        "lib/notcurses/",
+        "lib/tree_sitter/"
     ],
     "build-dir": "build",
     "targets": {

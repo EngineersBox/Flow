@@ -8,7 +8,7 @@ struct Error @cname("PieceChainError_t") {
     int err;
 }
 
-enum SaveMode : const CInt {
+enum SaveMode : const CInt @cname("PieceChainSaveMode") {
     AUTO = 0,
     ATOMIC = 1,
     INPLACE = 2,

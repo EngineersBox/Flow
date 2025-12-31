@@ -1,1 +1,178 @@
 module tree_sitter;
+
+typedef StateId = ushort;
+typedef Symbol = ushort;
+typedef FieldId = ushort;
+typedef Language = void;
+typedef Parser = void;
+typedef Tree = void;
+typedef Query = void;
+typedef QueryCursor = void;
+typedef LookaheadIterator = void;
+
+<* @param [&out] code_point *>
+alias DecodeFunction = fn uint(ZString* string, uint length, int* code_point);
+
+enum InputEncoding: const CInt @cname("TSInputEncoding") {
+    UTF8 = 0,
+    UTF16LE = 1,
+    UTF16BE = 2,
+    CUSTOM = 3
+}
+
+enum SymbolType: const CInt @cname("TSSymbolType") {
+    REGULAR = 0,
+    ANONYMOUS = 1,
+    SUPERTYPE = 2,
+    AUXILIARY = 3
+}
+
+struct Point @cname("TSPoint") {
+    uint row;
+    uint column;
+}
+
+struct Range @cname("TSRange") {
+    Point start_point;
+    Point end_point;
+    uint start_byte;
+    uint end_byte;
+}
+
+<*
+ @param [&in] payload
+ @param [&out] bytes_read
+*>
+alias ReadInput = fn ZString(void* payload, uint byte_index, Point position, uint* bytes_read);
+
+struct Input @cname("TSInput") {
+    void* payload;
+    ReadInput read;
+    InputEncoding encoding;
+    DecodeFunction decode;
+}
+
+struct ParseState @cname("TSParseState") {
+    void* payload;
+    uint current_byte_offset;
+    bool has_error;
+}
+<* @param [&in] state *>
+alias ParseProgressCallback = fn bool(ParseState* state);
+
+struct ParseOptions @cname("TSParseOptions") {
+    void* payload;
+    ParseProgressCallback progress_callback;
+}
+
+enum LogType: const CInt @cname("TSLogType") {
+    PARSE = 0,
+    LEX = 1
+}
+
+<* @param [&in] buffer *>
+alias LogCallback = fn void(void* payload, LogType log_type, ZString buffer);
+
+struct Logger @cname("TSLogger") {
+    void* payload;
+    LogCallback log;
+}
+
+struct InputEdit @cname("TSInputEdit") {
+    uint start_byte;
+    uint old_end_byte;
+    uint new_end_byte;
+    Point start_point;
+    Point old_end_point;
+    Point new_end_point;
+}
+
+struct Node @cname("TSNode") {
+    uint[4] context;
+    void* id;
+    Tree* tree;
+}
+
+struct TreeCursor @cname("TSTreeCursor") {
+    void* tree;
+    void* id;
+    uint[3] context;
+}
+
+struct QueryCapture {
+    Node node;
+    uint index;
+}
+
+enum Quantifier: const CInt @cname("TSQuantifier") {
+    ZERO = 0,
+    ZERO_OR_ONE = 1,
+    ZERO_OR_MORE = 2,
+    ONE = 3,
+    ONE_OR_MORE = 4
+}
+
+struct QueryMatch @cname("TSQueryMatch") {
+    uint id;
+    ushort pattern_index;
+    ushort capture_count;
+    QueryCapture* captures;
+}
+
+enum QueryPredicateStepType: const CInt @cname("TSQueryPredicateStepType") {
+    DONE = 0,
+    CAPTURE = 1,
+    STRING = 2
+}
+
+struct QueryPredicateStep @cname("TSQueryPredicateStep") {
+    QueryPredicateStepType type;
+    uint value_id;
+}
+
+enum QueryError: const CInt @cname("TSQueryError") {
+    NONE = 0,
+    SYNTAX = 1,
+    NODE_TYPE = 1,
+    FIELD = 2,
+    CAPTURE = 3,
+    STRUCTURE = 4,
+    LANGUAGE = 5
+}
+
+struct QueryCursorState @cname("TSQueryCursorState") {
+    void* payload;
+    uint current_byte_offset;
+}
+
+alias QueryCursorProgressCallback = fn bool(QueryCursorState* state);
+
+struct QueryCursorOptions @cname("TSQueryCursorOptions") {
+    void* payload;
+    QueryCursorProgressCallback progress_callback;
+}
+
+struct LanguageMetadata @cname("TSLanguageMetadata") {
+    char major_version;
+    char minor_version;
+    char patch_version;
+}
+
+extern fn Parser* parser_new() @cname("ts_parser_new");
+extern fn void Parser.delete(Parser* self) @cname("ts_parser_delete");
+
+extern fn Language* Parser.parser_language(Parser* self) @cname("ts_parser_language");
+extern fn bool Parser.set_language(Parser* self, Language* language) @cname("ts_parser_set_language");
+
+<* @param [&in] ranges *>
+extern fn bool Parser.set_included_ranges(Parser* self, Range* ranges, uint count) @cname("ts_parser_set_included_ranges");
+<* @param [&out] count *>
+extern fn Range Parser.get_included_ranges(Parser* self, uint* count) @cname("ts_parser_included_ranges");
+
+<*
+ @param [&in] old_tree
+ @param [&in] string
+*>
+extern fn Tree* Parser.parse_string(Parser* self, Tree* old_tree, ZString string, uint length) @cname("ts_parser_parse_string");
+
+extern fn void Parser.set_logger(Parser* self, Logger logger) @cname("ts_parser_set_logger");

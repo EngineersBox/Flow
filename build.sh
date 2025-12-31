@@ -71,17 +71,14 @@ while true; do
     esac
 done
 
-static_lib_extension=""
-dynamic_lib_extension=""
+static_lib_extension="a"
 
 case "$OSTYPE" in
     darwin*)
         static_lib_extension="a"
-        dynamic_lib_extension="dylib"
         ;;
     linux*|mysys*|cygwin*|bsd*)
         static_lib_extension="a"
-        dynamic_lib_extension="so"
         ;;
     *)
         echo "[ERROR] Unsupported OS: $OSTYPE"
@@ -89,12 +86,22 @@ case "$OSTYPE" in
         ;;
 esac
 
+libs_dir="$(pwd)/lib"
+include_dir="$(pwd)/include"
+
 function build_piece_chain() {
     pushd external/PieceChain
     echo "[INFO] Initialising cmake"
     cmake .
     echo "[INFO] Building PieceChain static library"
     make
+    echo "[INFO] Install libraries and headers into project"
+    local __libs_dir="$libs_dir/piece_chain"
+    local __include_dir="$include_dir/PieceChain"
+    mkdir -p "$__libs_dir"
+    mkdir -p "$__include_dir"
+    cp "libPieceChain.$static_lib_extension" "$__libs_dir/."
+    cp "include/PieceChain/PieceChain.h" "$__include_dir/."
     popd
 }
 
@@ -118,9 +125,15 @@ function build_notcurses() {
         -DUSE_MULTIMEDIA=ffmpeg \
         ..
     echo "[INFO] Building notcurses libraries"
-    make
-    echo "[INFO] Removing dynamic libraries"
-    rm *.$dynamic_lib_extension || true
+    make notcurses-core-static notcurses-static
+    echo "[INFO] Installing libraries and headers into project"
+    local __libs_dir="$libs_dir/notcurses"
+    local __include_dir="$include_dir/notcurses"
+    mkdir -p "$__libs_dir"
+    mkdir -p "$__include_dir"
+    cp *.a "$__libs_dir/."
+    cp -r ../include/notcurses/ "$__include_dir/."
+    cp include/version.h "$__include_dir/."
     popd
     popd
 }
@@ -128,7 +141,12 @@ function build_notcurses() {
 function build_tree_sitter {
     pushd external/tree-sitter
     echo "[INFO] Building static library"
-    make libtree-sitter.$static_lib_extension
+    make "libtree-sitter.$static_lib_extension"
+    echo "[INFO] Install libraries and headers into project"
+    local __libs_dir="$libs_dir/tree_sitter"
+    mkdir -p "$__libs_dir"
+    cp "libtree-sitter.$static_lib_extension" "$__libs_dir/."
+    cp -r lib/include/tree_sitter "$include_dir/."
     popd
 }
 

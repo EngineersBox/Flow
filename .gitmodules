@@ -1,3 +1,6 @@
 [submodule "external/PieceChain"]
 	path = external/PieceChain
 	url = git@github.com:engineersbox/PieceChain
+[submodule "external/notcurses"]
+	path = external/notcurses
+	url = git@github.com:dankamongmen/notcurses.git

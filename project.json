@@ -1,30 +1,48 @@
 {
-  // Language version of C3.
-  "langrev": "1",
-  // Warnings used for all targets.
-  "warnings": [ "no-unused" ],
-  // Directories where C3 library files may be found.
-  "dependency-search-paths": [ "lib" ],
-  "dependencies": [ ],
-  "authors": [ "EngineersBox" ],
-  "version": "0.1.0",
-  "sources": [ "src/**" ],
-  "test-sources": [ "test/**" ],
-  "c-sources": [ "csrc/**" ],
-  "c-include-dirs": [ "external/PieceChain/include" ],
-  // Build location, relative to project file.
-  "build-dir": "build",
-  // Output location, relative to project file.
-  "output": "build",
-  "targets": {
-    "flow": {
-      "type": "executable",
-      "target": "macos-aarch64",
-      "linked-libraries": ["PieceChain"],
-      "linker-search-paths": ["external/PieceChain/"]
+    "langrev": "1",
+    "warnings": [ "no-unused" ],
+    "dependency-search-paths": [ "lib" ],
+    "dependencies": [ ],
+    "authors": [ "EngineersBox" ],
+    "version": "0.1.0",
+    "sources": [ "src/**" ],
+    "test-sources": [ "test/**" ],
+    "c-sources": [ "csrc/**" ],
+    "c-include-dirs": [
+        "external/PieceChain/include",
+        "external/notcurses/include/notcurses"
+    ],
+    "linked-libraries": [
+        "PieceChain",
+        "notcurses",
+        "notcurses-core"
+    ],
+    "linker-search-paths": [
+        "external/PieceChain/",
+        "external/notcurses/build/"
+    ],
+    "build-dir": "build",
+    "targets": {
+        "linux_x64": {
+            "name": "flow",
+            "type": "executable",
+            "target": "linux-x64",
+            "output": "build/linux_x64"
+        },
+        "macos_aarch64": {
+            "name": "flow",
+            "type": "executable",
+            "target": "macos-aarch64",
+            "output": "build/macos_aarch64"
+        },
+        "macos_x64": {
+            "name": "flow",
+            "type": "executable",
+            "target": "macos-x64",
+            "output": "build/macos_x64"
+        },
     },
-  },
-  "cpu": "generic",
-  // Optimization: "O0", "O1", "O2", "O3", "O4", "O5", "Os", "Oz".
-  "opt": "O0"
+    "cpu": "generic",
+    // Optimization: "O0", "O1", "O2", "O3", "O4", "O5", "Os", "Oz".
+    "opt": "O0"
 }

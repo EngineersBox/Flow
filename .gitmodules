@@ -4,3 +4,8 @@
 [submodule "external/notcurses"]
 	path = external/notcurses
 	url = git@github.com:dankamongmen/notcurses.git
+	branch = v3.0.17
+[submodule "external/tree-sitter"]
+	path = external/tree-sitter
+	url = git@github.com:tree-sitter/tree-sitter.git
+	branch = v0.26.3

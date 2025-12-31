@@ -71,19 +71,38 @@ while true; do
     esac
 done
 
-if [ $rebuild -eq 1 ]; then
+static_lib_extension=""
+dynamic_lib_extension=""
+
+case "$OSTYPE" in
+    darwin*)
+        static_lib_extension="a"
+        dynamic_lib_extension="dylib"
+        ;;
+    linux*|mysys*|cygwin*|bsd*)
+        static_lib_extension="a"
+        dynamic_lib_extension="so"
+        ;;
+    *)
+        echo "[ERROR] Unsupported OS: $OSTYPE"
+        exit 1
+        ;;
+esac
+
+function build_piece_chain() {
     pushd external/PieceChain
     echo "[INFO] Initialising cmake"
     cmake .
     echo "[INFO] Building PieceChain static library"
     make
     popd
+}
 
+function build_notcurses() {
     pushd external/notcurses
     echo "[INFO] Creating build output directory"
     rm -rf build
     mkdir -p build
-
     pushd build
     echo "[INFO] Initialising cmake"
     cmake -DCMAKE_BUILD_TYPE=Release \
@@ -101,21 +120,22 @@ if [ $rebuild -eq 1 ]; then
     echo "[INFO] Building notcurses libraries"
     make
     echo "[INFO] Removing dynamic libraries"
-    case "$OSTYPE" in
-        darwin*)
-            rm *.dylib || true
-            ;;
-        linux*|mysys*|cygwin*)
-            rm *.so || true
-            ;;
-        *)
-            echo "[ERROR] Unsupported OS: $OSTYPE"
-            exit 1
-            ;;
-    esac
+    rm *.$dynamic_lib_extension || true
     popd
+    popd
+}
 
+function build_tree_sitter {
+    pushd external/tree-sitter
+    echo "[INFO] Building static library"
+    make libtree-sitter.$static_lib_extension
     popd
+}
+
+if [ $rebuild -eq 1 ]; then
+    build_piece_chain
+    build_notcurses
+    build_tree_sitter
 fi
 
 echo "[INFO] Building Flow executable"

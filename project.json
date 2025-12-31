@@ -10,16 +10,19 @@
     "c-sources": [ "csrc/**" ],
     "c-include-dirs": [
         "external/PieceChain/include",
-        "external/notcurses/include/notcurses"
+        "external/notcurses/include/notcurses",
+        "external/tree-sitter/include/tree_sitter"
     ],
     "linked-libraries": [
         "PieceChain",
         "notcurses",
-        "notcurses-core"
+        "notcurses-core",
+        "tree-sitter"
     ],
     "linker-search-paths": [
         "external/PieceChain/",
-        "external/notcurses/build/"
+        "external/notcurses/build/",
+        "external/tree-sitter/"
     ],
     "build-dir": "build",
     "targets": {

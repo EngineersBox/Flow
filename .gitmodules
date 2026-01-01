@@ -9,3 +9,6 @@
 	path = external/tree-sitter
 	url = git@github.com:tree-sitter/tree-sitter.git
 	branch = v0.26.3
+[submodule "external/librope"]
+	path = external/librope
+	url = https://github.com/josephg/librope.git

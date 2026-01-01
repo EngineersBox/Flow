@@ -39,6 +39,10 @@
             "target": "macos-x64",
             "output": "build/macos_x64"
         },
+        "build_deps": {
+            "type": "prepare",
+            "exec": [ "build_deps.c3" ]
+        }
     },
     "cpu": "generic",
     // Optimization: "O0", "O1", "O2", "O3", "O4", "O5", "Os", "Oz".

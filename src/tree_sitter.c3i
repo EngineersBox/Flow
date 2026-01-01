@@ -165,24 +165,52 @@ extern fn Language* Parser.parser_language(Parser* self) @cname("ts_parser_langu
 extern fn bool Parser.set_language(Parser* self, Language* language) @cname("ts_parser_set_language");
 
 <* @param [&in] ranges *>
-extern fn bool Parser.set_included_ranges(Parser* self, Range* ranges, uint count) @cname("ts_parser_set_included_ranges");
+extern fn bool Parser.set_included_ranges(
+    Parser* self,
+    Range* ranges,
+    uint count
+) @cname("ts_parser_set_included_ranges");
+
 <* @param [&out] count *>
 extern fn Range Parser.included_ranges(Parser* self, uint* count) @cname("ts_parser_included_ranges");
 
 <* @param [&in] old_tree *>
-extern fn Tree* Parser.parse(Parser* self, Tree* old_tree, Input input) @cname("ts_parser_parse");
+extern fn Tree* Parser.parse(
+    Parser* self,
+    Tree* old_tree,
+    Input input
+) @cname("ts_parser_parse");
+
 <* @param [&in] old_tree *>
-extern fn Tree* Parser.parse_with_options(Parser* self, Tree* old_tree, Input input, ParseOptions parse_options) @cname("ts_parse_parse_with_options");
+extern fn Tree* Parser.parse_with_options(
+    Parser* self,
+    Tree* old_tree,
+    Input input,
+    ParseOptions parse_options
+) @cname("ts_parse_parse_with_options");
+
 <*
  @param [&in] old_tree
  @param [&in] string
 *>
-extern fn Tree* Parser.parse_string(Parser* self, Tree* old_tree, ZString string, uint length) @cname("ts_parser_parse_string");
+extern fn Tree* Parser.parse_string(
+    Parser* self,
+    Tree* old_tree,
+    ZString string,
+    uint length
+) @cname("ts_parser_parse_string");
+
 <*
  @param [&in] old_tree
  @param [&in] string
 *>
-extern fn Tree* Parser.parse_string_encoding(Parser* self, Tree* old_tree, ZString string, uint length, InputEncoding encoding) @cname("ts_parser_parse_string_encoding");
+extern fn Tree* Parser.parse_string_encoding(
+    Parser* self,
+    Tree* old_tree,
+    ZString string,
+    uint length,
+    InputEncoding encoding
+) @cname("ts_parser_parse_string_encoding");
 
 extern fn void Parser.reset(Parser* self);
 
@@ -199,7 +227,11 @@ extern fn void Tree.delete(Tree* self) @cname("ts_tree_delete");
 <* @param [&in] self *>
 extern fn Node* Tree.root_node(Tree* self) @cname("ts_tree_root_node");
 <* @param [&in] self *>
-extern fn Node* Tree.root_node_with_offset(Tree* self, uint offset_bytes, Point offset_extent) @cname("ts_tree_root_node_with_offset");
+extern fn Node* Tree.root_node_with_offset(
+    Tree* self,
+    uint offset_bytes,
+    Point offset_extent
+) @cname("ts_tree_root_node_with_offset");
 
 <* @param [&in] self *>
 extern fn Language* Tree.language(Tree* self) @cname("ts_tree_language");
@@ -212,12 +244,17 @@ extern fn Range* Tree.included_ranges(Tree* self, uint* length) @cname("ts_tree_
 
 <* @param [&in] edit *>
 extern fn void Tree.edit(Tree* self, InputEdit* edit) @cname("ts_tree_edit");
+
 <*
  @param [&in] self 
  @param [&in] new_tree
  @param [&out] length
 *>
-extern fn Range* Tree.get_changed_ranges(Tree* self, Tree* new_tree, uint* length) @cname("ts_tree_get_changed_ranges");
+extern fn Range* Tree.get_changed_ranges(
+    Tree* self,
+    Tree* new_tree,
+    uint* length
+) @cname("ts_tree_get_changed_ranges");
 
 <* @param [&in] self *>
 extern fn void Tree.print_dot_graph(Tree* self, int file_descriptor) @cname("ts_tree_print_dot_graph");
@@ -250,27 +287,63 @@ extern fn Node Node.parent(Node self) @cname("ts_node_parent");
 extern fn Node Node.child_with_decendant(Node self, Node decendant) @cname("ts_node_child_with_decendant");
 extern fn Node Node.child(Node self, uint child_index) @cname("ts_node_child");
 
-extern fn ZString Node.field_name_for_named_child(Node self, uint named_child_index) @cname("ts_field_name_for_named_child");
+extern fn ZString Node.field_name_for_named_child(
+    Node self,
+    uint named_child_index
+) @cname("ts_field_name_for_named_child");
+
 extern fn uint Node.child_count(Node self) @cname("ts_node_child_count");
 extern fn Node Node.named_child(Node self, uint child_index) @cname("ts_node_named_child");
 extern fn uint Node.named_child_count(Node self) @cname("ts_node_named_child_count");
+
 <* @param [&in] name *>
-extern fn Node Node.named_child_by_field_name(Node self, ZString name, uint name_length) @cname("ts_node_named_child_by_field_name");
-extern fn Node Node.named_child_by_field_id(Node self, FieldId field_id) @cname("ts_node_named_child_by_field_id");
+extern fn Node Node.named_child_by_field_name(
+    Node self,
+    ZString name,
+    uint name_length
+) @cname("ts_node_named_child_by_field_name");
+
+extern fn Node Node.named_child_by_field_id(
+    Node self,
+    FieldId field_id
+) @cname("ts_node_named_child_by_field_id");
 
 extern fn Node Node.next_sibling(Node self) @cname("ts_node_next_sibling");
 extern fn Node Node.prev_sibling(Node self) @cname("ts_node_prev_sibling");
 extern fn Node Node.next_named_sibling(Node self) @cname("ts_node_next_named_sibling");
 extern fn Node Node.prev_named_sibling(Node self) @cname("ts_node_prev_named_sibling");
-
 extern fn Node Node.first_child_for_byte(Node self, uint byte) @cname("ts_node_first_child_for_byte");
-extern fn Node Node.first_named_child_for_byte(Node self, uint byte) @cname("ts_node_first_named_child_for_byte");
+
+extern fn Node Node.first_named_child_for_byte(
+    Node self,
+    uint byte
+) @cname("ts_node_first_named_child_for_byte");
 
 extern fn uint Node.decendant_count(Node self) @cname("ts_node_decendant_count");
-extern fn Node Node.decendant_for_byte_range(Node self, uint start, uint end) @cname("ts_node_decendant_for_byte_range");
-extern fn Node Node.decendant_for_point_range(Node self, Point start, Point end) @cname("ts_node_decendant_for_point_range");
-extern fn Node Node.named_decendant_for_byte_range(Node self, uint start, uint end) @cname("ts_node_named_decendant_for_byte_range");
-extern fn Node Node.named_decendant_for_point_range(Node self, Point start, Point end) @cname("ts_node_named_decendant_for_point_range");
+
+extern fn Node Node.decendant_for_byte_range(
+    Node self,
+    uint start,
+    uint end
+) @cname("ts_node_decendant_for_byte_range");
+
+extern fn Node Node.decendant_for_point_range(
+    Node self,
+    Point start,
+    Point end
+) @cname("ts_node_decendant_for_point_range");
+
+extern fn Node Node.named_decendant_for_byte_range(
+    Node self,
+    uint start,
+    uint end
+) @cname("ts_node_named_decendant_for_byte_range");
+
+extern fn Node Node.named_decendant_for_point_range(
+    Node self,
+    Point start,
+    Point end
+) @cname("ts_node_named_decendant_for_point_range");
 
 <* @param [&in] edit *>
 extern fn void Node.edit(Node* self, InputEdit* edit) @cname("ts_node_edit");
@@ -281,5 +354,387 @@ extern fn bool Node.eq(Node self, Node other) @cname("ts_node_eq");
  @param [&in] edit
 *>
 extern fn void Point.edit(Point* self, uint* point_byte, InputEdit* edit) @cname("ts_point_edit");
+
 <* @param [&in] edit *>
 extern fn void Range.edit(Range* self, InputEdit* edit) @cname("ts_range_edit");
+
+extern fn TreeCursor Node.tree_cursor_new(Node self) @cname("ts_tree_cursor_new");
+extern fn void TreeCursor.delete(TreeCursor self) @cname("ts_tree_cursor_delete");
+
+extern fn void TreeCursor.reset(TreeCursor* self, Node node) @cname("ts_tree_cursor_reset");
+
+<* @param [&in] src *>
+extern fn void TreeCursor.reset_to(TreeCursor* self, TreeCursor* src) @cname("ts_tree_cursor_reset_to");
+
+<* @param [&in] self *>
+extern fn Node TreeCursor.current_node(TreeCursor* self) @cname("ts_tree_cursor_current_node");
+
+<* @param [&in] self *>
+extern fn ZString TreeCursor.current_field_name(TreeCursor* self) @cname("ts_tree_cursor_current_field_name");
+
+extern fn FieldId TreeCursor.current_field_id(TreeCursor* self) @cname("ts_tree_cursor_current_field_id");
+
+extern fn bool TreeCursor.goto_parent(TreeCursor* self) @cname("ts_tree_cursor_goto_parent");
+extern fn bool TreeCursor.goto_next_sibiling(TreeCursor* self) @cname("ts_tree_cursor_goto_next_sibling");
+extern fn bool TreeCursor.goto_previous_sibling(TreeCursor* self) @cname("ts_tree_cursor_goto_previous_sibling");
+extern fn bool TreeCursor.goto_first_child(TreeCursor* self) @cname("ts_tree_cursor_goto_first_child");
+extern fn bool TreeCursor.goto_last_child(TreeCursor* self) @cname("ts_tree_cursor_goto_last_child");
+
+extern fn void TreeCursor.goto_decendant(
+    TreeCursor* self,
+    uint goal_decendant_index
+) @cname("ts_tree_cursor_goto_decendant");
+
+<* @param [&in] self *>
+extern fn uint TreeCursor.current_decendant_index(
+    TreeCursor* self
+) @cname("ts_tree_cursor_current_decendant_index");
+
+<* @param [&in] self *>
+extern fn uint TreeCursor.current_depth(TreeCursor* self) @cname("ts_tree_cursor_current_depth");
+
+extern fn long TreeCursor.goto_first_child_for_byte(
+    TreeCursor* self,
+    uint goal_byte
+) @cname("ts_tree_cursor_goto_first_child_for_byte");
+
+extern fn long TreeCursor.goto_first_child_for_point(
+    TreeCursor* self,
+    Point goal_point
+) @cname("ts_tree_cursor_goto_first_child_for_point");
+
+<* @param [&in] self *>
+extern fn TreeCursor TreeCursor.copy(TreeCursor* self) @cname("ts_tree_cursor_copy");
+
+<*
+ @param [&in] language
+ @param [&in] source
+ @param [&out] error_offset
+ @param [&out] error_type
+*>
+extern fn Query* query_new(
+    Language* language,
+    ZString source,
+    uint source_len,
+    uint* error_offset,
+    QueryError* error_type
+) @cname("ts_query_new");
+
+extern fn void Query.delete(Query* self) @cname("ts_query_delete");
+
+<* @param [&in] self *>
+extern fn uint Query.pattern_count(Query* self) @cname("ts_query_pattern_count");
+
+<* @param [&in] self *>
+extern fn uint Query.capture_count(Query* self) @cname("ts_query_capture_count");
+
+<* @param [&in] self *>
+extern fn uint Query.string_count(Query* self) @cname("ts_query_string_count");
+
+<* @param [&in] self *>
+extern fn uint Query.start_byte_for_pattern(
+    Query* self,
+    uint pattern_index
+) @cname("ts_query_start_byte_for_pattern");
+
+<* @param [&in] self *>
+extern fn uint Query.end_byte_for_pattern(
+    Query* self,
+    uint pattern_index
+) @cname("ts_query_end_byte_for_pattern");
+
+<*
+ @param [&in] self
+ @param [&out] step_count
+*>
+extern fn QueryPredicateStep* Query.predicates_for_pattern(
+    Query* self,
+    uint pattern_index,
+    uint* step_count
+) @cname("ts_query_predicates_for_pattern");
+
+<* @param [&in] self *>
+extern fn bool Query.is_pattern_rooted(
+    Query* self,
+    uint pattern_index
+) @cname("ts_query_is_pattern_rooted");
+
+<* @param [&in] self *>
+extern fn bool Query.is_pattern_non_local(
+    Query* self,
+    uint pattern_index
+) @cname("ts_query_is_pattern_non_local");
+
+<* @param [&in] self *>
+extern fn bool Query.is_pattern_guaranteed_to_stop(
+    Query* self,
+    uint byte_offset
+) @cname("ts_query_is_pattern_guaranteed_to_stop");
+
+<*
+ @param [&in] self
+ @param [&out] length
+*>
+extern fn ZString Query.capture_name_for_id(
+    Query* self,
+    uint index,
+    uint* length
+) @cname("ts_query_capture_name_for_id");
+
+<* @param [&in] self *>
+extern fn Quantifier Query.capture_quantifier_for_id(
+    Query* self,
+    uint pattern_index,
+    uint capture_index
+) @cname("ts_query_capture_quantifier_for_id");
+
+<*
+ @param [&in] self
+ @param [&out] length
+*>
+extern fn ZString Query.capture_string_value_for_id(
+    Query* self,
+    uint index,
+    uint* length
+) @cname("ts_query_capture_string_value_for_id");
+
+<* @param [&in] name *>
+extern fn void Query.disable_capture(Query* self, ZString name, uint length) @cname("ts_query_disable_capture");
+extern fn void Query.disable_pattern(Query* self, uint pattern_index) @cname("ts_query_disable_pattern");
+
+extern fn QueryCursor* query_cursor_new() @cname("ts_query_cursor_new");
+extern fn void QueryCursor.delete(QueryCursor* self) @cname("ts_query_cursor_delete");
+
+<* @param [&in] query *>
+extern fn void QueryCursor.exec(QueryCursor* self, Query* query, Node node) @cname("ts_query_cursor_exec");
+
+<*
+ @param [&in] query
+ @param [&in] query_options
+*>
+extern fn void QueryCursor.exec_with_options(
+    QueryCursor* self,
+    Query* query,
+    Node node,
+    QueryCursorOptions* query_options
+) @cname("ts_query_cursor_exec_with_options");
+
+extern fn bool QueryCursor.did_exceed_match_limit(
+    QueryCursor* self
+) @cname("ts_query_cursor_did_exceed_match_limit");
+
+<* @param [&in] self *>
+extern fn uint QueryCursor.match_limit(QueryCursor* self) @cname("ts_query_cursor_match_limit");
+extern fn void QueryCursor.set_match_limit(
+    QueryCursor* self,
+    uint limit
+) @cname("ts_query_cursor_set_match_limit");
+
+extern fn bool QueryCursor.set_byte_range(
+    QueryCursor* self,
+    uint start_byte,
+    uint end_byte
+) @cname("ts_query_cursor_set_byte_range");
+
+extern fn bool QueryCursor.set_point_range(
+    QueryCursor* self,
+    Point start_point,
+    Point end_point
+) @cname("ts_query_cursor_set_point_range");
+
+extern fn bool QueryCursor.set_containing_byte_range(
+    QueryCursor* self,
+    uint start_byte,
+    uint end_byte
+) @cname("ts_query_cursor_set_containing_byte_range");
+
+extern fn bool QueryCursor.set_containing_point_range(
+    QueryCursor* self,
+    Point start_point,
+    Point end_point
+) @cname("ts_query_cursor_set_containing_point_range");
+
+<* @param [&out] match *>
+extern fn bool QueryCursor.next_match(QueryCursor* self, QueryMatch* match) @cname("ts_query_cursor_next_match");
+extern fn void QueryCursor.remove_match(QueryCursor* self, uint match_id) @cname("ts_query_cursor_remove_match");
+
+<*
+ @param [&out] match
+ @param [&out] capture_index
+*>
+extern fn bool QueryCursor.next_capture(
+    QueryCursor* self,
+    QueryMatch* match,
+    uint* capture_index
+) @cname("ts_query_cursor_next_capture");
+
+extern fn void QueryCursor.set_max_start_depth(
+    QueryCursor* self,
+    uint max_start_depth
+) @cname("ts_query_cursor_set_max_start_depth");
+
+<* @param [&in] self *>
+extern fn Language* Language.copy(Language* self) @cname("ts_language_copy");
+
+<* @param [&in] self *>
+extern fn void Language.delete(Language* self) @cname("ts_language_delete");
+
+<* @param [&in] self *>
+extern fn uint Language.symbol_count(Language* self) @cname("ts_language_symbol_count");
+
+<* @param [&in] self *>
+extern fn uint Language.state_count(Language* self) @cname("ts_language_state_count");
+
+<*
+ @param [&in] self
+ @param [&in] string
+*>
+extern fn Symbol Language.symbol_for_name(
+    Language* self,
+    ZString string,
+    uint length,
+    bool is_named
+) @cname("ts_language_symbol_for_name");
+
+
+<* @param [&in] self *>
+extern fn uint Language.field_count(Language* self) @cname("ts_language_field_count");
+
+<* @param [&in] self *>
+extern fn ZString Language.field_name_for_id(Language* self, FieldId id) @cname("ts_language_field_name_for_id");
+
+<*
+ @param [&in] self
+ @param [&in] name
+*>
+extern fn FieldId Language.field_id_for_name(
+    Language* self,
+    ZString name,
+    uint name_length
+) @cname("ts_language_field_id_for_name");
+
+<*
+ @param [&in] self
+ @param [&out] length
+*>
+extern fn Symbol* Language.supertypes(Language* self, uint* length) @cname("ts_language_supertypes");
+
+<*
+ @param [&in] self
+ @param [&out] length
+*>
+extern fn Symbol* Language.subtypes(
+    Language* self,
+    Symbol supertype,
+    uint* length
+) @cname("ts_language_subtypes");
+
+<* @param [&in] self *>
+extern fn ZString Language.symbol_name(Language* self, Symbol symbol) @cname("ts_language_symbol_name");
+
+<* @param [&in] self *>
+extern fn SymbolType Language.symbol_type(Language* self, Symbol symbol) @cname("ts_language_symbol_type");
+
+<* @param [&in] self *>
+extern fn uint Language.abi_version(Language* self) @cname("ts_language_abi_version");
+
+<* @param [&in] self *>
+extern fn LanguageMetadata* Language.metadata(Language* self) @cname("ts_language_metadata");
+
+<* @param [&in] self *>
+extern fn StateId Language.next_state(
+    Language* self,
+    StateId state,
+    Symbol symbol
+) @cname("ts_language_next_state");
+
+<* @param [&in] self *>
+extern fn ZString Language.name(Language* self) @cname("ts_language_name");
+
+<* @param [&in] self *>
+extern fn LookaheadIterator* Language.lookahead_iterator_new(
+    Language* self,
+    StateId state
+) @cname("ts_lookahead_iterator_new");
+
+extern fn void LookaheadIterator.delete(LookaheadIterator* self) @cname("ts_lookahead_iterator_delete");
+
+extern fn bool LookaheadIterator.reset_state(
+    LookaheadIterator* self,
+    StateId state
+) @cname("ts+lookahead_iterator_reset_state");
+
+<* @param [&in] language *>
+extern fn bool LookaheadIterator.reset(
+    LookaheadIterator* self,
+    Language* language,
+    StateId state
+) @cname("ts+lookahead_iterator_reset");
+
+<* @param [&in] self *>
+extern fn Language* LookaheadIterator.language(LookaheadIterator* self) @cname("ts_lookahead_iterator_language");
+
+extern fn bool LookaheadIterator.next(LookaheadIterator* self) @cname("ts_lookahead_iterator_next");
+
+<* @param [&in] self *>
+extern fn Symbol LookaheadIterator.current_symbol(
+    LookaheadIterator* self
+) @cname("ts_lookahead_iterator_current_symbol");
+
+<* @param [&in] self *>
+extern fn ZString LookaheadIterator.current_symbol_name(
+    LookaheadIterator* self
+) @cname("ts_lookahead_iterator_current_symbol_name");
+
+typedef WasmEngine = void;
+typedef WasmStore = void;
+
+enum WasmErrorKind: const CInt @cname("TSWasmErrorKind") {
+    NONE = 0,
+    PARSE = 1,
+    COMPILE = 2,
+    INSTANTIATE = 3,
+    ALLOCATE = 4
+}
+
+struct WasmError @cname("TSWasmError") {
+    WasmErrorKind kind;
+    ZString message;
+}
+
+<* @param [&out] error *>
+extern fn WasmStore* wasm_store_new(WasmEngine* engine, WasmEngine* error) @cname("ts_wasm_store_new");
+extern fn void WasmStore.delete(WasmStore* self) @cname("ts_wasm_store_delete");
+
+<*
+ @param [&in] name
+ @param [&in] wasm
+ @param [&out] error
+*>
+extern fn Language* WasmStore.load_language(
+    WasmStore* self,
+    ZString name,
+    ZString wasm,
+    uint wasm_len,
+    WasmError* error
+) @cname("ts_wasm_store_load_language");
+
+<* @param [&in] self *>
+extern fn usz WasmStore.language_count(WasmStore* self) @cname("ts_wasm_store_language_count");
+
+<* @param [&in] self *>
+extern fn bool Language.is_wasm(Language* self) @cname("ts_language_is_wasm");
+extern fn void Parser.set_wasm_store(Parser* self, WasmStore* store) @cname("ts_parser_set_wasm_store");
+extern fn WasmStore* Parser.take_wasm_store(Parser* self) @cname("ts_parser_take_wasm_store");
+
+alias Malloc = fn void*(usz size);
+alias Calloc = fn void*(usz size, usz count);
+alias Realloc = fn void*(void* ptr, usz new_size);
+alias Free = fn void(void* ptr);
+
+extern fn void set_allocator(
+    Malloc malloc,
+    Calloc calloc,
+    Realloc realloc,
+    Free free
+) @cname("ts_set_allocator");

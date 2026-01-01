@@ -1,5 +1,8 @@
 module tree_sitter;
 
+const usz TREE_SITTER_LANGUAGE_VERSION = 15;
+const usz TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION = 13;
+
 typedef StateId = ushort;
 typedef Symbol = ushort;
 typedef FieldId = ushort;
@@ -156,6 +159,22 @@ struct LanguageMetadata @cname("TSLanguageMetadata") {
     char major_version;
     char minor_version;
     char patch_version;
+}
+
+typedef WasmEngine = void;
+typedef WasmStore = void;
+
+enum WasmErrorKind: const CInt @cname("TSWasmErrorKind") {
+    NONE = 0,
+    PARSE = 1,
+    COMPILE = 2,
+    INSTANTIATE = 3,
+    ALLOCATE = 4
+}
+
+struct WasmError @cname("TSWasmError") {
+    WasmErrorKind kind;
+    ZString message;
 }
 
 extern fn Parser* parser_new() @cname("ts_parser_new");
@@ -685,22 +704,6 @@ extern fn Symbol LookaheadIterator.current_symbol(
 extern fn ZString LookaheadIterator.current_symbol_name(
     LookaheadIterator* self
 ) @cname("ts_lookahead_iterator_current_symbol_name");
-
-typedef WasmEngine = void;
-typedef WasmStore = void;
-
-enum WasmErrorKind: const CInt @cname("TSWasmErrorKind") {
-    NONE = 0,
-    PARSE = 1,
-    COMPILE = 2,
-    INSTANTIATE = 3,
-    ALLOCATE = 4
-}
-
-struct WasmError @cname("TSWasmError") {
-    WasmErrorKind kind;
-    ZString message;
-}
 
 <* @param [&out] error *>
 extern fn WasmStore* wasm_store_new(WasmEngine* engine, WasmEngine* error) @cname("ts_wasm_store_new");

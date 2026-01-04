@@ -62,8 +62,8 @@ macro Rope.@foreach(Rope* self; @body(node)) {
     }
 }
 
-macro ZString RopeNode.data(RopeNode* self) {
-    return (ZString) &self.str;
+macro ZString* RopeNode.data(RopeNode* self) {
+    return (ZString*) &self.str;
 }
 
 macro usz RopeNode.num_chars(RopeNode* self) {

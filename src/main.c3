@@ -17,14 +17,13 @@ fn int main(String[] args) {
     defer pc.destroy();
     usz bytes = pc.size();
     io::printf("Size: %d\n",bytes);
-    @pool() {
-        piece_chain::PieceChainIterator* iter = pc.iter(0, bytes);
-        ZString data = null;
-        usz len = 0;
-        while (iter.next(&data, &len)) {
-            io::printf("%s (%d)\n", data, len);
-        }
-    };
+    piece_chain::PieceChainIterator* iter = pc.iter(0, bytes);
+    ZString data = null;
+    usz len = 0;
+    while (iter.next(&data, &len)) {
+        io::printf("%s (%d)\n", data, len);
+    }
+    iter.free();
 
     librope::Rope* rope = librope::create_with_allocators(
         &malloc,

@@ -56,9 +56,8 @@ fn int main(String[] args) {
     rope.@foreach(;librope::RopeNode* node) {
         io::printfn("Node: %s", node.data());
     };
-
     io::printfn("Expected: [ Got: %c", rope.get(16));
-
+    io::printfn("Expected: r Got: %c", rope.get(8));
     @pool() {
         io::printfn("Rope data: %s", rope.create_cstr());
     };

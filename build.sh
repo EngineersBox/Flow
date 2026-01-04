@@ -28,7 +28,6 @@ function printHelp() {
     echo "    -h | --help            Print this help message"
     echo "    -r | --rebuild         Build dependencies and executable (default: false)"
     echo "    -t | --target=<target> Target architecture [Default: macos_aarch64] (See project.json)"
-
 }
 
 # Note that options with a ':' require an argument
@@ -95,13 +94,33 @@ function build_piece_chain() {
     cmake .
     echo "[INFO] Building PieceChain static library"
     make
-    echo "[INFO] Install libraries and headers into project"
+    echo "[INFO] Installing libraries and headers into project"
     local __libs_dir="$libs_dir/piece_chain"
     local __include_dir="$include_dir/PieceChain"
     mkdir -p "$__libs_dir"
     mkdir -p "$__include_dir"
     cp "libPieceChain.$static_lib_extension" "$__libs_dir/."
     cp "include/PieceChain/PieceChain.h" "$__include_dir/."
+    popd
+}
+
+function build_librope() {
+    pushd external/librope
+    echo "[INFO] Removing forced x86_64 build in Makefile"
+    if [[ "$OSTYPE" == darwin* ]]; then
+        gsed -i -z -E 's/ifeq \(\$\(UNAME\), Darwin\)\nCFLAGS := \$\(CFLAGS\) \-arch x86_64\nendif\n//g' Makefile
+    else
+        sed -i -z -E 's/ifeq \(\$\(UNAME\), Darwin\)\nCFLAGS := \$\(CFLAGS\) \-arch x86_64\nendif\n//g' Makefile
+    fi
+    echo "[INFO] Building static library"
+    make clean all
+    echo "[INFO] Installing libraries and header into project"
+    local __libs_dir="$libs_dir/rope"
+    local __include_dir="$include_dir/rope"
+    mkdir -p "$__libs_dir"
+    mkdir -p "$__include_dir"
+    cp "librope.$static_lib_extension" "$__libs_dir/."
+    cp "rope.h" "$__include_dir/."
     popd
 }
 
@@ -151,7 +170,8 @@ function build_tree_sitter {
 }
 
 if [ $rebuild -eq 1 ]; then
-    build_piece_chain
+    # build_piece_chain
+    build_librope
     build_notcurses
     build_tree_sitter
 fi

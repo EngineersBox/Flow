@@ -10,12 +10,14 @@
     "c-include-dirs": [ "include/**", ],
     "linked-libraries": [
         "PieceChain",
+        "rope",
         "notcurses",
         "notcurses-core",
         "tree-sitter"
     ],
     "linker-search-paths": [
         "lib/piece_chain/",
+        "lib/rope/",
         "lib/notcurses/",
         "lib/tree_sitter/"
     ],

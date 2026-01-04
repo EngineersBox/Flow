@@ -67,6 +67,32 @@ macro RopeResult Rope.replace_overlapping(Rope* self, usz pos, ZString str) {
     return self.replace(pos, str.len(), str);
 }
 
+<* @param [&in] self *>
+fn char Rope.get(Rope* self, usz char_pos) {
+    assert(char_pos <= self.num_chars);
+    RopeNode* node = &self.head;
+    int height = self.head.height - 1;
+    usz offset = char_pos;
+    usz skip;
+    while (true) {
+        skip = node.nexts[height].skip_size;
+        if (offset > skip) {
+            // Right
+            assert(node == &self.head || node.num_bytes > 0);
+            offset -= skip;
+            node = node.nexts[height].node;
+            continue;
+        }
+        // Down
+        if (height == 0) {
+            break;
+        }
+        height--;
+    }
+    assert(offset <= NODE_STR_SIZE);
+    return node.str[offset];
+}
+
 <* @require $defined(self.head) *>
 macro Rope.@foreach(Rope* self; @body(node)) {
     for (RopeNode* iter = &self.head; iter != null; iter = iter.nexts[0].node) {

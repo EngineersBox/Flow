@@ -57,6 +57,8 @@ fn int main(String[] args) {
         io::printfn("Node: %s", node.data());
     };
 
+    io::printfn("Expected: [ Got: %c", rope.get(16));
+
     @pool() {
         io::printfn("Rope data: %s", rope.create_cstr());
     };

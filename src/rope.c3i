@@ -13,7 +13,7 @@ struct RopeNode @cname("rope_node") {
     char[NODE_STR_SIZE] str;
     ushort num_bytes;
     char height;
-    RopeSkipNode[] nexts;
+    RopeSkipNode[*] nexts;
 }
 
 alias RopeAlloc = fn void*(usz bytes);
@@ -44,6 +44,7 @@ extern fn void Rope.destroy(Rope* self) @cname("rope_free");
 
 <* @param [&in] self *>
 extern fn usz Rope.char_count(Rope* self) @cname("rope_char_count");
+
 <* @param [&in] self *>
 extern fn usz Rope.byte_count(Rope* self) @cname("rope_byte_count");
 
@@ -55,15 +56,26 @@ extern fn ZString Rope.create_cstr(Rope* self) @cname("rope_create_cstr");
 extern fn RopeResult Rope.insert(Rope* self, usz pos, ZString str) @cname("rope_insert");
 extern fn void Rope.remove(Rope* self, usz pos, usz num) @cname("rope_del");
 
-<* @require $defined(self.head)  *>
+<* @param [&in] str *>
+macro RopeResult Rope.replace(Rope* self, usz pos, usz num, ZString str) {
+    self.remove(pos, num);
+    return self.insert(pos, str);
+}
+
+<* @param [&in] str *>
+macro RopeResult Rope.replace_overlapping(Rope* self, usz pos, ZString str) {
+    return self.replace(pos, str.len(), str);
+}
+
+<* @require $defined(self.head) *>
 macro Rope.@foreach(Rope* self; @body(node)) {
-    for (RopeNode* iter = &self.head; iter != null && iter.nexts.len > 0; iter = iter.nexts[0].node) {
+    for (RopeNode* iter = &self.head; iter != null; iter = iter.nexts[0].node) {
         @body(iter);
     }
 }
 
-macro ZString* RopeNode.data(RopeNode* self) {
-    return (ZString*) &self.str;
+macro ZString RopeNode.data(RopeNode* self) {
+    return (ZString) &self.str;
 }
 
 macro usz RopeNode.num_chars(RopeNode* self) {

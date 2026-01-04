@@ -17,24 +17,48 @@ fn int main(String[] args) {
     defer pc.destroy();
     usz bytes = pc.size();
     io::printf("Size: %d\n",bytes);
-    piece_chain::PieceChainIterator* iter = pc.iter(0, bytes);
-    defer iter.free();
-    ZString data = null;
-    usz len = 0;
-    while (iter.next(&data, &len)) {
-        io::printf("%s (%d)\n", data, len);
-    }
+    @pool() {
+        piece_chain::PieceChainIterator* iter = pc.iter(0, bytes);
+        ZString data = null;
+        usz len = 0;
+        while (iter.next(&data, &len)) {
+            io::printf("%s (%d)\n", data, len);
+        }
+    };
 
-    librope::Rope* rope = librope::create_with_utf8("Some stuff");
+    librope::Rope* rope = librope::create_with_allocators(
+        &malloc,
+        &realloc,
+        &free
+    );
     defer rope.destroy();
-    librope::RopeResult result = rope.insert(5, "more ");
+    librope::RopeResult result = rope.insert(
+        0,
+        "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+        +++ " Phasellus id augue vel magna sodales feugiat."
+        +++ " Vivamus posuere ac neque cursus mattis posuere."
+    );
+    if (result == librope::RopeResult.INVALID_UTF8) {
+        io::printn("Failed to insert into rope");
+        return 1;
+    }
+    result = rope.insert(5, " more");
+    if (result == librope::RopeResult.INVALID_UTF8) {
+        io::printn("Failed to insert into rope");
+        return 1;
+    }
+    result = rope.replace_overlapping(15, " [REDACTED] ");
     if (result == librope::RopeResult.INVALID_UTF8) {
         io::printn("Failed to insert into rope");
         return 1;
     }
     rope.print();
     rope.@foreach(;librope::RopeNode* node) {
-        io::printfn("Data: %s", node.data());
+        io::printfn("Node: %s", node.data());
+    };
+
+    @pool() {
+        io::printfn("Rope data: %s", rope.create_cstr());
     };
 
     tree_sitter::Parser* parser = tree_sitter::parser_new();

@@ -49,3 +49,12 @@ enum Align: const CInt @cname("ncalign_e") {
 
 const CInt ALIGN_TOP = (CInt) Align.LEFT;
 const CInt ALIGN_BOTTOM = (CInt) Align.RIGHT;
+
+enum Scale: const CInt @cname("ncscale_e") {
+    NONE = 0,
+    SCALE = 1,
+    STRETCH = 2,
+    NONE_HIRES = 3,
+    SCALE_HIRES = 4
+}
+

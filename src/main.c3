@@ -3,6 +3,11 @@ import std::io;
 import piece_chain;
 import librope;
 import tree_sitter;
+import notcurses;
+
+fn void draw() {
+
+}
 
 fn void log(void* payload, tree_sitter::LogType log_type, ZString buffer) {
     io::printf(
@@ -24,6 +29,51 @@ fn int main(String[] args) {
         io::printf("%s (%d)\n", data, len);
     }
     iter.free();
+    io::printn("=== INSERT ===");
+    ZString value = " more";
+    if (!pc.insert(5, value, value.len())) {
+        io::printn("Failed to insert into piece chain");
+        return 1;
+    }
+    iter = pc.iter(0, bytes);
+    data = null;
+    len = 0;
+    while (iter.next(&data, &len)) {
+        io::printf("%s (%d)\n", data, len);
+    }
+    iter.free();
+    pc.commit();
+    pc.save("test_v1.txt", piece_chain::SaveMode.AUTO);
+    io::printn("=== REPLACE ===");
+    value = " [REDACTED] ";
+    if (!pc.replace(15, value, value.len())) {
+        io::printn("Failed to replace on piece chain");
+        return 1;
+    }
+    iter = pc.iter(0, bytes);
+    data = null;
+    len = 0;
+    while (iter.next(&data, &len)) {
+        io::printf("%s (%d)\n", data, len);
+    }
+    iter.free();
+    io::printn("=== UNDO ===");
+    usz undo_pos = 0;
+    if (pc.undo(&undo_pos)) {
+        io::printn("Undo successful");
+    } else {
+        io::printn("Nothing to undo");
+    }
+    iter = pc.iter(0, bytes);
+    data = null;
+    len = 0;
+    while (iter.next(&data, &len)) {
+        io::printf("%s (%d)\n", data, len);
+    }
+    iter.free();
+    pc.commit();
+    pc.save("test_v2.txt", piece_chain::SaveMode.AUTO);
+    io::printn("=== END ===");
 
     librope::Rope* rope = librope::create_with_allocators(
         &malloc,

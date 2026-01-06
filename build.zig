@@ -19,7 +19,7 @@ pub fn build(b: *std.Build) !void {
             .sanitize_c = .off, // Causes memory issues
         }),
         mod,
-        "ncurses",
+        "notcurses",
         &[_][]const u8{notcurses_lib_path ++ "/include"},
         &[_][]const u8{"deflate", "ncurses", "unistring", "readline", "z"},
         &[_][]const u8{

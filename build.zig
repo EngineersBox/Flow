@@ -9,14 +9,56 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
         .link_libc = true,
     });
-    const notcurses = try addNotcursesCLibrary(
+    const notcurses_lib_path = "external/notcurses";
+    try addCLibrary(
         b,
-        target,
-        optimize,
+        b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .sanitize_c = .off, // Causes memory issues
+        }),
         mod,
+        "ncurses",
+        &[_][]const u8{notcurses_lib_path ++ "/include"},
+        &[_][]const u8{"deflate", "ncurses", "unistring", "readline", "z"},
+        &[_][]const u8{
+            notcurses_lib_path ++ "/include",
+            notcurses_lib_path ++ "/build/include",
+            notcurses_lib_path ++ "/src"
+        },
+        &[_][]const u8{
+            notcurses_lib_path ++ "/src/lib/",
+            notcurses_lib_path ++ "/src/compat/"
+        },
+        &[_][]const u8{
+            "-std=gnu11",
+            "-D_GNU_SOURCE",
+            "-DUSE_MULTIMEDIA=none",
+        }
     );
-    b.installArtifact(notcurses);
-    mod.linkLibrary(notcurses);
+    const piecechain_lib_path = "external/PieceChain";
+    try addCLibrary(
+        b,
+        b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .sanitize_c = .off, // Causes memory issues
+        }),
+        mod,
+        "piecechain",
+        &[_][]const u8{piecechain_lib_path ++ "/include"},
+        &[_][]const u8{},
+        &[_][]const u8{
+            piecechain_lib_path ++ "/include",
+            piecechain_lib_path ++ "/src"
+        },
+        &[_][]const u8{piecechain_lib_path ++ "/src/"},
+        &[_][]const u8{
+            "-std=gnu11"
+        },
+    );
     const exe = b.addExecutable(.{
         .name = "flow",
         .root_module = mod,
@@ -42,31 +84,26 @@ pub fn build(b: *std.Build) !void {
     // test_step.dependOn(&run_exe_tests.step);
 }
 
-// Big help from:
-// - https://github.com/dundalek/notcurses-zig-example
-// - https://github.com/dundalek/notcurses-zig-example/pull/6
-fn addNotcursesCLibrary(
+fn addCLibrary(
     b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    mod: *std.Build.Module,
     root_module: *std.Build.Module,
-) !*std.Build.Step.Compile {
-    const notcurses_source_path = "external/notcurses";
-    root_module.addIncludePath(b.path(notcurses_source_path ++ "/include"));
-    const mod = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-        .sanitize_c = .off,
-    });
-    mod.linkSystemLibrary("deflate", .{.preferred_link_mode = .static});
-    mod.linkSystemLibrary("ncurses", .{.preferred_link_mode = .static});
-    mod.linkSystemLibrary("readline", .{.preferred_link_mode = .static});
-    mod.linkSystemLibrary("unistring", .{.preferred_link_mode = .static});
-    mod.linkSystemLibrary("z", .{.preferred_link_mode = .static});
-    mod.addIncludePath(b.path(notcurses_source_path ++ "/include"));
-    mod.addIncludePath(b.path(notcurses_source_path ++ "/build/include"));
-    mod.addIncludePath(b.path(notcurses_source_path ++ "/src"));
+    comptime name: []const u8,
+    comptime root_module_include_paths: []const []const u8,
+    comptime system_libraries: []const []const u8,
+    comptime include_paths: []const []const u8,
+    comptime source_paths: []const []const u8,
+    comptime compile_flags: []const []const u8,
+) !void {
+    for (root_module_include_paths) |p| {
+        root_module.addIncludePath(b.path(p));
+    }
+    for (system_libraries) |sys_lib| {
+        mod.linkSystemLibrary(sys_lib, .{ .preferred_link_mode = .static });
+    }
+    for (include_paths) |inc_path| {
+        mod.addIncludePath(b.path(inc_path));
+    }
     var files: std.ArrayList([]const u8) = try .initCapacity(b.allocator, 0);
     defer {
         for (files.items) |file| {
@@ -74,22 +111,20 @@ fn addNotcursesCLibrary(
         }
         files.deinit(b.allocator);
     }
-    try collectCSources(b, notcurses_source_path ++ "/src/lib/", &files);
-    try collectCSources(b, notcurses_source_path ++ "/src/compat/", &files);
+    for (source_paths) |src_path| {
+        try collectCSources(b, src_path, &files);
+    }
     mod.addCSourceFiles(.{
         .files = files.items,
-        .flags = &[_][]const u8{
-            "-std=gnu11",
-            "-D_GNU_SOURCE",
-            "-DUSE_MULTIMEDIA=none",
-        }
+        .flags = compile_flags,
     });
-    const notcurses: *std.Build.Step.Compile = b.addLibrary(.{
-        .name = "notcurses",
+    const library: *std.Build.Step.Compile = b.addLibrary(.{
+        .name = name,
         .linkage = .static,
         .root_module = mod,
     });
-    return notcurses;
+    b.installArtifact(library);
+    root_module.linkLibrary(library);
 }
 
 fn collectCSources(b: *std.Build, path: []const u8, files: *std.ArrayList([]const u8)) !void {

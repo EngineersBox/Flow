@@ -25,11 +25,11 @@ macro uint channel_alpha(uint channel) {
     return channel & BG_ALPHA_MASK;
 }
 
-faultdef INVALID_ALPHA;
+faultdef UNSUPPORTED_BG_ALPHA_FORMAT;
 
 fn void? channel_set_alpha(uint* channel, uint alpha) {
     if (alpha & ~BG_ALPHA_MASK) {
-        return INVALID_ALPHA?;
+        return UNSUPPORTED_BG_ALPHA_FORMAT?;
     }
     *channel = alpha | (*channel & (uint)~BG_ALPHA_MASK);
     if (alpha != ALPHA_OPAQUE) {
@@ -41,9 +41,9 @@ macro bool channel_default_p(uint channel) {
     return !(channel & BGDEFAULT_MASK);
 }
 
-macro uint channel_set_default(uint* channel) {
+macro uint? channel_set_default(uint* channel) {
     *channel &= (uint)~BGDEFAULT_MASK;
-    channel_set_alpha(channel, ALPHA_OPAQUE);
+    channel_set_alpha(channel, ALPHA_OPAQUE)!;
     return *channel;
 }
 
@@ -66,8 +66,8 @@ fn void? channel_set_palindex(uint* channel, uint idx) {
     *channel |= BGDEFAULT_MASK | BG_PALETTE | idx;
 }
 
-macro bool ncchannel_rgb_p(uint channel){
-  return !(ncchannel_default_p(channel) || ncchannel_palindex_p(channel));
+macro bool channel_rgb_p(uint channel){
+  return !(channel_default_p(channel) || channel_palindex_p(channel));
 }
 
 macro uint channel_r(uint channel) {
@@ -135,7 +135,7 @@ fn void channel_set_rgb8_clipped(uint* channel, int r, int g, int b) {
 }
 
 macro uint channels_bchannel(ulong channels) {
-    return channels & (BG_RGB_MASK | BG_PALETTE | BGDEFAULT_MASK | BG_ALPHA_MASK);
+    return ((uint) channels) & (BG_RGB_MASK | BG_PALETTE | BGDEFAULT_MASK | BG_ALPHA_MASK);
 }
 
 macro uint channels_fchannel(ulong channels) {
@@ -159,7 +159,7 @@ macro uint channels_bg_alpha(ulong channels) {
 }
 
 macro ulong channels_set_bchannel(ulong* channels, uint channel) {
-    *channels &= ((0xffffffff << 32) | NOBACKGROUND_MASK);
+    *channels &= ((((ulong)0xffffffff) << 32) | NOBACKGROUND_MASK);
     *channels |= (uint) (channel & ~NOBACKGROUND_MASK);
     return *channels;
 }
@@ -174,4 +174,146 @@ macro ulong channels_set_channels(ulong* dst, ulong channels) {
     channels_set_bchannel(dst, channels & 0xffffffff);
     channels_set_fchannel(dst, (uint) ((channels >> 32) & 0xffffffff));
     return *dst;
+}
+
+fn void? channels_set_bg_alpha(ulong* channels, uint alpha) {
+    if (alpha == ALPHA_HIGHCONTRAST) {
+        return UNSUPPORTED_BG_ALPHA_FORMAT?;
+    }
+    uint channel = channels_bchannel(*channels);
+    channel_set_alpha(&channel, alpha)!;
+    channels_set_bchannel(channels, channel);
+}
+
+macro uint channels_fg_alpha(ulong channels) {
+    return channel_alpha(channels_fchannel(channels));
+}
+
+fn void? channels_set_fg_alpha(ulong* channels, uint alpha) {
+    uint channel = channels_fchannel(*channels);
+    channel_set_alpha(&channel, alpha)!;
+    *channels = ((ulong) channel << 32) | (*channels & 0xffffffff);
+}
+
+fn ulong? channels_reverse(ulong channels) {
+    ulong raw = ((ulong) channels_bchannel(channels) << 32) + channels_fchannel(channels);
+    ulong statemask = ((NOBACKGROUND_MASK | BG_ALPHA_MASK) << 32u) |
+                               NOBACKGROUND_MASK | BG_ALPHA_MASK;
+    ulong ret = raw & ~statemask;
+    ret |= channels & statemask;
+    if (channels_bg_alpha(ret) != ALPHA_OPAQUE && !channels_bg_rgb_p(ret)) {
+        channels_set_bg_alpha(&ret, ALPHA_OPAQUE)!;
+    }
+    if (channels_fg_alpha(ret) != ALPHA_OPAQUE && !channels_fg_rgb_p(ret)){
+        channels_set_fg_alpha(&ret, ALPHA_OPAQUE)!;
+    }
+    return ret;
+}
+macro ulong channels_combine(uint fchan, uint bchan) {
+	ulong channels = 0;
+	channels_set_fchannel(&channels, fchan);
+	channels_set_bchannel(&channels, bchan);
+	return channels;
+}
+
+macro uint channels_fg_palindex(ulong channels) {
+	return channel_palindex(channels_fchannel(channels));
+}
+
+macro uint channels_bg_palindex(ulong channels) {
+	return channel_palindex(channels_bchannel(channels));
+}
+
+macro uint channels_fg_rgb(ulong channels) {
+	return channel_rgb(channels_fchannel(channels));
+}
+
+macro uint channels_bg_rgb(ulong channels) {
+	return channel_rgb(channels_bchannel(channels));
+}
+
+macro uint channels_fg_rgb8(ulong channels, uint* r, uint* g, uint* b) {
+	return channel_rgb8(channels_fchannel(channels), r, g, b);
+}
+
+macro uint channels_bg_rgb8(ulong channels, uint* r, uint* g, uint* b) {
+	return channel_rgb8(channels_bchannel(channels), r, g, b);
+}
+
+fn void? channels_set_fg_rgb8(ulong* channels, uint r, uint g, uint b) {
+    uint channel = channels_fchannel(*channels);
+    channel_set_rgb8(&channel, r, g, b)!;
+    *channels = ((ulong) channel << 32) | (*channels & 0xffffffff);
+}
+
+fn void channels_set_fg_rgb8_clipped(ulong* channels, int r, int g, int b) {
+    uint channel = channels_fchannel(*channels);
+    channel_set_rgb8_clipped(&channel, r, g, b);
+    *channels = ((ulong) channel << 32) | (*channels & 0xffffffff);
+}
+
+fn void? channels_set_fg_palindex(ulong* channels, uint idx) {
+    uint channel = channels_fchannel(*channels);
+    channel_set_palindex(&channel, idx)!;
+    *channels = ((ulong) channel << 32) | (*channels & 0xffffffff);
+}
+
+fn void? channels_set_fg_rgb(ulong* channels, uint rgb) {
+    uint channel = channels_fchannel(*channels);
+    channel_set(&channel, rgb)!;
+    *channels = ((ulong) channel << 32) | (*channels & 0xffffffff);
+}
+
+fn void? channels_set_bg_rgb8(ulong* channels, uint r, uint g, uint b) {
+    uint channel = channels_bchannel(*channels);
+    channel_set_rgb8(&channel, r, g, b)!;
+    channels_set_bchannel(channels, channel);
+}
+
+fn void? channels_set_bg_rgb8_clipped(ulong* channels, int r, int g, int b) {
+    uint channel = channels_bchannel(*channels);
+    channel_set_rgb8_clipped(&channel, r, g, b);
+    channels_set_bchannel(channels, channel);
+}
+
+fn void? channels_set_bg_palindex(ulong* channels, uint idx) {
+    uint channel = channels_bchannel(*channels);
+    channel_set_palindex(&channel, idx)!;
+    channels_set_bchannel(channels, channel);
+}
+
+fn void? channels_set_bg_rgb(ulong* channels, uint rgb) {
+    uint channel = channels_bchannel(*channels);
+    channel_set(&channel, rgb)!;
+    channels_set_bchannel(channels, channel);
+}
+
+macro bool channels_fg_default_p(ulong channels) {
+    return channel_default_p(channels_fchannel(channels));
+}
+
+macro bool channels_fg_palindex_p(ulong channels) {
+    return channel_palindex_p(channels_fchannel(channels));
+}
+
+macro bool channels_bg_default_p(ulong channels) {
+    return channel_default_p(channels_bchannel(channels));
+}
+
+macro bool channels_bg_palindex_p(ulong channels) {
+    return channel_palindex_p(channels_bchannel(channels));
+}
+
+fn ulong? channels_set_fg_default(ulong* channels) {
+    uint channel = channels_fchannel(*channels);
+    channel_set_default(&channel)!;
+    channels_set_fchannel(channels, channel);
+    return *channels;
+}
+
+fn ulong? channels_set_bg_default(ulong* channels) {
+    uint channel = channels_bchannel(*channels);
+    channel_set_default(&channel)!;
+    channels_set_bchannel(channels, channel);
+    return *channels;
 }

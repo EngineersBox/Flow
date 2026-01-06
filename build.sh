@@ -27,12 +27,11 @@ function printHelp() {
     echo "Options:"
     echo "    -h | --help            Print this help message"
     echo "    -r | --rebuild         Build dependencies and executable (default: false)"
-    echo "    -t | --target=<target> Target architecture [Default: macos_aarch64] (See project.json)"
 }
 
 # Note that options with a ':' require an argument
-LONGOPTS=help,rebuild,target:
-OPTIONS=hrt:
+LONGOPTS=help,rebuild
+OPTIONS=hr
 
 # 1. Temporarily store output to be able to check for errors
 # 2. Activate quoting/enhanced mode (e.g. by writing out “--options”)
@@ -43,7 +42,6 @@ PARSED=$(getopt --options=$OPTIONS --longoptions=$LONGOPTS --name "$0" -- "$@") 
 eval set -- "$PARSED"
 
 rebuild=0
-target="macos_aarch64"
 # Handle options in order and nicely split until we see --
 while true; do
     case "$1" in
@@ -54,10 +52,6 @@ while true; do
         -r|--rebuild)
             rebuild=1
             shift
-            ;;
-        -t|--target)
-            target=$2
-            shift 2
             ;;
         --)
             shift
@@ -87,6 +81,8 @@ esac
 
 libs_dir="$(pwd)/lib"
 include_dir="$(pwd)/include"
+
+# TODO: Stop building these libs, and make them Zig modules
 
 function build_piece_chain() {
     pushd external/PieceChain
@@ -138,10 +134,9 @@ function build_notcurses() {
         -DUSE_DOCTEST=OFF \
         -DUSE_PANDOC=OFF \
         -DUSE_CXX=OFF \
-        -DUSE_STATIC=ON \
         -DUSE_POC=OFF \
         -DUSE_DOXYGEN=OFF \
-        -DUSE_MULTIMEDIA=ffmpeg \
+        -DUSE_MULTIMEDIA=none \
         ..
     echo "[INFO] Building notcurses libraries"
     make notcurses-core-static notcurses-static
@@ -170,11 +165,11 @@ function build_tree_sitter {
 }
 
 if [ $rebuild -eq 1 ]; then
-    # build_piece_chain
+    build_piece_chain
     build_librope
     build_notcurses
     build_tree_sitter
 fi
 
-echo "[INFO] Building Flow executable"
-c3c build "$target"
+echo "[INFO] Building executable"
+zig build

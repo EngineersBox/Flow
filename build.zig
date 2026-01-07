@@ -59,6 +59,16 @@ pub fn build(b: *std.Build) !void {
             "-std=gnu11"
         },
     );
+    const tree_sitter = b.dependency("tree_sitter", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    mod.addImport("tree-sitter", tree_sitter.module("tree_sitter"));
+    const known_folders = b.dependency("known_folders", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    mod.addImport("known-folders", known_folders.module("known-folders"));
     const exe = b.addExecutable(.{
         .name = "flow",
         .root_module = mod,

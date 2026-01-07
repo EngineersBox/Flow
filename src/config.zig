@@ -3,11 +3,6 @@ const zon = std.zon;
 const Allocator = std.mem.Allocator;
 const known_folders = @import("known-folders");
 
-pub const known_folders_config: known_folders.KnownFolderConfig = .{
-    .xdg_force_default = false,
-    .xdg_on_mac = true,
-};
-
 const LOCATIONS: [3]known_folders.KnownFolder = [_]known_folders.KnownFolder{
     .local_configuration,
     .roaming_configuration,

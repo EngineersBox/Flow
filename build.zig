@@ -34,7 +34,10 @@ pub fn build(b: *std.Build) !void {
         &[_][]const u8{
             "-std=gnu11",
             "-D_GNU_SOURCE",
-            "-DUSE_MULTIMEDIA=none",
+            // NOTE: This means only notcurses_core_init can be used.
+            //       Change this to Non-none for the notcurses_init
+            //       symbol to be defined
+            "-DUSE_MULTIMEDIA=none", 
         }
     );
     const piecechain_lib_path = "external/PieceChain";
@@ -49,7 +52,7 @@ pub fn build(b: *std.Build) !void {
         mod,
         "piecechain",
         &[_][]const u8{piecechain_lib_path ++ "/include"},
-        &[_][]const u8{},
+        null,
         &[_][]const u8{
             piecechain_lib_path ++ "/include",
             piecechain_lib_path ++ "/src"
@@ -64,6 +67,11 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     mod.addImport("tree-sitter", tree_sitter.module("tree_sitter"));
+    const ts_lang_zig = b.dependency("ts_lang_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    mod.addImport("ts-lang-zig", ts_lang_zig.module("tree-sitter-zig"));
     const known_folders = b.dependency("known_folders", .{
         .target = target,
         .optimize = optimize,
@@ -100,16 +108,18 @@ fn addCLibrary(
     root_module: *std.Build.Module,
     comptime name: []const u8,
     comptime root_module_include_paths: []const []const u8,
-    comptime system_libraries: []const []const u8,
+    comptime system_libraries: ?[]const []const u8,
     comptime include_paths: []const []const u8,
     comptime source_paths: []const []const u8,
-    comptime compile_flags: []const []const u8,
+    comptime compile_flags: ?[]const []const u8,
 ) !void {
     for (root_module_include_paths) |p| {
         root_module.addIncludePath(b.path(p));
     }
-    for (system_libraries) |sys_lib| {
-        mod.linkSystemLibrary(sys_lib, .{ .preferred_link_mode = .static });
+    if (system_libraries) |sys_libs| {
+        for (sys_libs) |sys_lib| {
+            mod.linkSystemLibrary(sys_lib, .{ .preferred_link_mode = .static });
+        }
     }
     for (include_paths) |inc_path| {
         mod.addIncludePath(b.path(inc_path));
@@ -126,7 +136,7 @@ fn addCLibrary(
     }
     mod.addCSourceFiles(.{
         .files = files.items,
-        .flags = compile_flags,
+        .flags = compile_flags orelse &[_][]const u8{},
     });
     const library: *std.Build.Step.Compile = b.addLibrary(.{
         .name = name,

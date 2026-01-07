@@ -50,7 +50,6 @@ pub fn fromKnownLocationsOrDefault(gpa: Allocator) error{OutOfMemory,ParseZon}!@
             continue;
         };
         defer flow_dir.close();
-        std.debug.print("Found\n", .{});
         if (flow_dir.openFile(
             CONFIG_FILE_NAME,
             .{ .mode = .read_only },

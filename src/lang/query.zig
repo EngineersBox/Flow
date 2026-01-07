@@ -50,9 +50,9 @@ pub const Queries = struct {
         var parenthesis_level: usize = 0;
         var match_stack = try std.ArrayList(u8).initCapacity(self.allocator, 0);
         defer match_stack.clearAndFree();
-        var tag_stack = Tags.init(self.allocator);
+        var tag_stack = try Tags.initCapacity(self.allocator, 0);
         defer {
-            while (tag_stack.popOrNull()) |tag| {
+            while (tag_stack.pop()) |tag| {
                 tag.deinit();
             }
             tag_stack.deinit();
@@ -98,7 +98,7 @@ pub const Queries = struct {
                     parsing_tag = false;
                 },
                 '}' => {
-                    const matching = match_stack.popOrNull() orelse {
+                    const matching = match_stack.pop() orelse {
                         std.log.err("Unmatched '}}' @ {d}, has no opening partner on the stack", .{i});
                         return error.TrailingUnmatchedBrace;
                     };
@@ -116,7 +116,7 @@ pub const Queries = struct {
                     parsing_tag = false;
                 },
                 ']' => {
-                    const matching = match_stack.popOrNull() orelse {
+                    const matching = match_stack.pop() orelse {
                         std.log.err("Unmatched ']' @ {d}, has no opening partner on the stack", .{i});
                         return error.TrailingUnmatchedBracket;
                     };
@@ -134,7 +134,7 @@ pub const Queries = struct {
                     parsing_tag = false;
                 },
                 ')' => {
-                    const matching = match_stack.popOrNull() orelse {
+                    const matching = match_stack.pop() orelse {
                         std.log.err("Unmatched ')' @ {d}, has no opening partner on the stack", .{i});
                         return error.TrailingUnmatchedParenthesis;
                     };
@@ -152,7 +152,7 @@ pub const Queries = struct {
                     }
                     // Don't add the leading '@' to a tag since we need
                     // to remove it later anyway
-                    try tag_stack.append(Tag.init(self.allocator));
+                    try tag_stack.append(try Tag.initCapacity(self.allocator, 0));
                     parsing_tag = true;
                 },
                 0x41...0x5A, 0x61...0x7A, 0x30...0x39, 0x2E => {
@@ -170,9 +170,9 @@ pub const Queries = struct {
             if (char == '\n' and bracket_level == 0 and bracket_level == 0 and parenthesis_level == 0 and !parsing_tag and tag_stack.items.len > 0) {
                 const result = try self.elems.getOrPut(query.?);
                 if (!result.found_existing) {
-                    result.value_ptr.* = Tags.init(self.allocator);
+                    result.value_ptr.* = try Tags.initCapacity(self.allocator, 0);
                 }
-                while (tag_stack.popOrNull()) |tag| {
+                while (tag_stack.pop()) |tag| {
                     try result.value_ptr.append(tag);
                 }
                 query = null;

@@ -4,6 +4,12 @@ const nc = ncz.nc;
 const pc = @import("piecechain.zig").pc;
 const ts = @import("tree-sitter");
 const Config = @import("config.zig");
+const known_folders = @import("known-folders");
+
+pub const known_folders_config: known_folders.KnownFolderConfig = .{
+    .xdg_force_default = false,
+    .xdg_on_mac = true,
+};
 
 pub fn main() !void {
     var gpa_creator = std.heap.GeneralPurposeAllocator(.{}){};

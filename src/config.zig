@@ -3,69 +3,125 @@ const zon = std.zon;
 const Allocator = std.mem.Allocator;
 const known_folders = @import("known-folders");
 
+pub const known_folders_config: known_folders.KnownFolderConfig = .{
+    .xdg_force_default = false,
+    .xdg_on_mac = true,
+};
+
 const LOCATIONS: [3]known_folders.KnownFolder = [_]known_folders.KnownFolder{
     .local_configuration,
     .roaming_configuration,
     .global_configuration,
 };
-const CONFIG_FILE_NAME = "flow.zon";
+const CONFIG_FILE_NAME = "config.zon";
 
 spaces_per_tab: usize = 4,
 
-pub fn fromKnownLocationsOrDefault(gpa: Allocator) !@This() {
+pub fn fromKnownLocationsOrDefault(gpa: Allocator) error{OutOfMemory,ParseZon}!@This() {
     for (LOCATIONS) |location| {
-        var cfg_dir: []const u8 = undefined;
-        if (try known_folders.getPath(gpa, location)) |cfg| {
-            cfg_dir = cfg;
+        var dir: std.fs.Dir = undefined;
+        if (known_folders.open(
+            gpa,
+            location,
+            .{
+                .access_sub_paths = true,
+            },
+        ) catch |err| {
+            std.log.debug(
+                "Failed to open {s}: {s}\n",
+                .{ @tagName(location), @errorName(err) },
+            );
+            continue;
+        }) |d| {
+            dir = d;
         } else {
+            std.log.debug(
+                "Directory {s} does not exist, skipping\n",
+                .{@tagName(location)},
+            );
             continue;
         }
-        defer gpa.free(cfg_dir);
-        var dir: std.fs.Dir = try std.fs.openDirAbsolute(cfg_dir, .{});
         defer dir.close();
-        if (dir.openFile(
+        var flow_dir: std.fs.Dir = dir.openDir(
+            "flow",
+            .{
+                .access_sub_paths = true,
+            },
+        ) catch |err| {
+            std.debug.print(
+                "Failed to open subdirectory {s}: {s}\n",
+                .{ @tagName(location), @errorName(err) },
+            );
+            continue;
+        };
+        defer flow_dir.close();
+        std.debug.print("Found\n", .{});
+        if (flow_dir.openFile(
             CONFIG_FILE_NAME,
             .{ .mode = .read_only },
         )) |cfg_file| {
             defer cfg_file.close();
-            return fromFile(gpa, cfg_file);
+            return try fromFile(gpa, cfg_file) orelse continue;
         } else |err| switch (err) {
             error.PermissionDenied, error.AccessDenied => {
-                const path: []const u8 = dir.realpathAlloc(gpa, CONFIG_FILE_NAME) catch |err1| {
+                const path: []const u8 = dir.realpathAlloc(
+                    gpa,
+                    CONFIG_FILE_NAME,
+                ) catch |err1| {
                     std.log.err(
                         "Failed to canonicalise config directory with config file name: {s}",
                         .{@errorName(err1)},
                     );
-                    return @This(){};
+                    continue;
                 };
+                defer gpa.free(path);
                 std.log.warn(
-                    "Failed to access config file {s}: {s}",
-                    .{path, @errorName(err)},
+                    "Failed to access config file {s}: {s}, skipping",
+                    .{ path, @errorName(err) },
                 );
             },
-            else => continue,
+            else => {
+                std.log.warn(
+                    "Unknown error accessing config file{s}: {s}, skipping\n",
+                    .{ @tagName(location), @errorName(err) },
+                );
+                continue;
+            },
         }
     }
+    std.log.info("No viable config file found, using defaults", .{});
     return @This(){};
 }
 
-pub fn fromPath(gpa: Allocator, path: []const u8) !@This() {
-    const file: std.fs.File = try std.fs.openFileAbsolute(
+pub fn fromPath(gpa: Allocator, path: []const u8) error{OutOfMemory,ParseZon}!?@This() {
+    const file: std.fs.File = std.fs.openFileAbsolute(
         path,
         .{ .mode = .read_only },
-    );
+    ) catch |err| {
+        std.log.err("Failed to open config path {s}: {s}", .{path, @errorName(err)},);
+        return null;
+    };
     defer file.close();
     return fromFile(gpa, file);
 }
 
-pub fn fromFile(gpa: Allocator, file: std.fs.File) !@This() {
-    var file_buffer: [4096]u8 = undefined;
-    var reader: std.Io.Reader = file.reader(&file_buffer).interface;
-    const data = try reader.allocRemaining(gpa, .unlimited);
+pub fn fromFile(gpa: Allocator, file: std.fs.File) error{OutOfMemory,ParseZon}!?@This() {
+    const stat: std.fs.File.Stat = file.stat() catch |err| {
+        std.log.err("Failed to stat config file: {s}", .{@errorName(err)});
+        return null;
+    };
+    var data = try gpa.alloc(u8, stat.size + 1);
+    data[data.len - 1] = 0;
     defer gpa.free(data);
+    var file_buffer: [4096]u8 = undefined;
+    var reader = file.reader(&file_buffer);
+    reader.interface.readSliceAll(data[0 .. data.len - 1]) catch |err| {
+        std.log.err("Failed to read config file data: {s}", .{@errorName(err)});
+        return null;
+    };
     var diag: zon.parse.Diagnostics = .{};
     defer diag.deinit(gpa);
-    return zon.parse.fromSlice(
+    return try zon.parse.fromSlice(
         @This(),
         gpa,
         data[0 .. data.len - 1 :0],

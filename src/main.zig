@@ -93,6 +93,7 @@ pub fn main() !void {
         tabbed,
         null,
         null,
+        // Interesting method for anonymous functions. Note that they can be stateful
         struct {
             fn cb(_: ?*nc.nctab, _: ?*nc.ncplane, _: ?*anyopaque) callconv(.c) void {
                 // Do nothing

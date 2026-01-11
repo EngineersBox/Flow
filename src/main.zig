@@ -37,20 +37,11 @@ pub fn main() !void {
     defer parser.destroy();
 
     // Piece chain
-    const chain: *pc.struct_PieceChain_t = pc.piece_chain_open("test.txt").?;
+    const ch: *pc.struct_PieceChain_t = pc.piece_chain_open("test_file.zig").?;
     std.debug.print("Opened piece chain\n", .{});
-    defer pc.piece_chain_destroy(chain);
-    _ = pc.piece_chain_insert(chain, 5, " more", 5);
-    std.debug.print("Inserted data\n", .{});
-    const iter: *pc.struct_PieceChainIterator_t = pc.piece_chain_iter(chain, 0, pc.piece_chain_size(chain)).?;
-    defer pc.piece_chain_iter_free(iter);
-    std.debug.print("Iterating\n", .{});
-    var data: [*c]const u8 = null;
-    var len: usize = 0;
-    while (pc.piece_chain_iter_next(iter, &data, &len)) {
-        std.debug.print("Data: {s}\n", .{data[0..len]});
-    }
-    std.debug.print("Done\n", .{});
+    defer pc.piece_chain_destroy(ch);
+    // _ = pc.piece_chain_insert(ch, 5, " more", 5);
+    // std.debug.print("Inserted data\n", .{});
 
     // Notcurses
     _ = std.c.setlocale(std.c.LC.ALL, "");
@@ -89,18 +80,59 @@ pub fn main() !void {
         &tabbed_opts,
     ) orelse @panic("Failed to create tabbed");
     defer nc.nctabbed_destroy(tabbed);
+    const CBData = struct { gpa: std.mem.Allocator, chain: *pc.PieceChain_t };
+    var outer_cb_data: CBData = .{
+        .gpa = gpa,
+        .chain = ch,
+    };
     const tab: *nc.nctab = nc.nctabbed_add(
         tabbed,
         null,
         null,
         // Interesting method for anonymous functions. Note that they can be stateful
         struct {
-            fn cb(_: ?*nc.nctab, _: ?*nc.ncplane, _: ?*anyopaque) callconv(.c) void {
-                // Do nothing
+            fn cb(_: ?*nc.nctab, _content_plane: ?*nc.ncplane, usrptr: ?*anyopaque) callconv(.c) void {
+                const cb_data: *CBData = @ptrCast(@alignCast(usrptr orelse @panic("No userptr provided")));
+                const content_plane: *nc.ncplane = _content_plane orelse @panic("No content plane");
+                nc.ncplane_erase(content_plane);
+                // _ = nc.ncplane_set_scrolling(content_plane, 1);
+                const iter: *pc.struct_PieceChainIterator_t = pc.piece_chain_iter(
+                    cb_data.chain,
+                    0,
+                    pc.piece_chain_size(cb_data.chain),
+                ) orelse @panic("Failed to create piece chain iterator");
+                defer pc.piece_chain_iter_free(iter);
+                var data: [*c]const u8 = null;
+                var len: usize = 0;
+                var y: c_int = 0;
+                const max_lines = nc.ncplane_dim_y(content_plane);
+                while (pc.piece_chain_iter_next(iter, &data, &len)) outer_loop: {
+                    var line_iter = std.mem.splitAny(u8, data[0..len], "\n");
+                    while (line_iter.next()) |raw_line| {
+                        if (y == max_lines) {
+                            break :outer_loop;
+                        }
+                        _ = nc.ncplane_set_fg_rgb8(content_plane, 0xC8, 0xC8, 0xC8);
+                        var line_nr: [3:0]u8 = .{ 0, 0, 0 };
+                        _ = std.fmt.printInt(&line_nr, y, 10, .lower, .{});
+                        _ = nc.ncplane_putstr_yx(content_plane, y, 0, &line_nr);
+                        if (raw_line.len == 0) {
+                            y += 1;
+                            continue;
+                        }
+                        _ = nc.ncplane_set_fg_rgb8(content_plane, 0x00, 0xC8, 0xC8);
+                        const line = std.fmt.allocPrintSentinel(cb_data.gpa, "{s}", .{raw_line}, 0) catch @panic("Failed to print with sentinel");
+                        defer cb_data.gpa.free(line);
+                        if (nc.ncplane_putstr_yx(content_plane, y, 3, line) < 0) {
+                            std.debug.print("Failed to print line: {d} {s}\n", .{y, line});
+                        }
+                        y += 1;
+                    }
+                }
             }
         }.cb,
         "tab",
-        null,
+        @ptrCast(@alignCast(&outer_cb_data)),
     ) orelse @panic("Failed to add tab");
     defer nc.nctabbed_del(tabbed, tab);
     const tab2: *nc.nctab = nc.nctabbed_add(
@@ -109,7 +141,7 @@ pub fn main() !void {
         null,
         struct {
             fn cb(_: ?*nc.nctab, _: ?*nc.ncplane, _: ?*anyopaque) callconv(.c) void {
-                // Do nothing
+                // Nah
             }
         }.cb,
         "tab2",

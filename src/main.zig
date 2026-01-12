@@ -121,12 +121,64 @@ pub fn main() !void {
                             continue;
                         }
                         _ = nc.ncplane_set_fg_rgb8(content_plane, 0x00, 0xC8, 0xC8);
-                        const line = std.fmt.allocPrintSentinel(cb_data.gpa, "{s}", .{raw_line}, 0) catch @panic("Failed to print with sentinel");
+                        const line: [:0]const u8 = std.fmt.allocPrintSentinel(
+                            cb_data.gpa,
+                            "{s}",
+                            .{raw_line},
+                            0,
+                        ) catch @panic("Failed to print with sentinel");
                         defer cb_data.gpa.free(line);
                         if (nc.ncplane_putstr_yx(content_plane, y, 3, line) < 0) {
-                            std.debug.print("Failed to print line: {d} {s}\n", .{y, line});
+                            std.debug.print("Failed to print line: {d} {s}\n", .{ y, line });
                         }
                         y += 1;
+                    }
+                }
+                if (nc.ncplane_cursor_move_yx(content_plane, 0, 26) != 0) {
+                    std.debug.print("Failed to set cursor position\n", .{});
+                    return;
+                }
+                for (0..2) |_| {
+                    // Reset current cursor cell
+                    var cell: nc.nccell = .{};
+                    if (nc.ncplane_at_cursor_cell(content_plane, &cell) == -1) {
+                        std.debug.print("Failed to get cursor cell\n", .{});
+                        break;
+                    }
+                    _ = nc.nccell_set_bg_rgb8(&cell, 0x88, 0x28, 0x28);
+                    _ = nc.nccell_set_bg_alpha(&cell, nc.NCALPHA_OPAQUE);
+                    var cursor_x: c_uint = 0;
+                    var cursor_y: c_uint = 0;
+                    nc.ncplane_cursor_yx(content_plane, &cursor_y, &cursor_x);
+                    if (nc.ncplane_putc_yx(
+                        content_plane,
+                        @intCast(cursor_y),
+                        @intCast(cursor_x),
+                        &cell,
+                    ) == -1) {
+                        std.debug.print("Failed to set cell at cursor pos: {d},{d}\n", .{cursor_x,cursor_y});
+                    }
+                    // Update new cursor cell
+                    // TODO: Figure out best way to constrain cursor to line
+                    const ret: c_int = nc.ncplane_cursor_move_rel(content_plane, 0, 1);
+                    if (ret != 0) {
+                        std.debug.print("Failed to move cursor to {d}: {d}\n", .{cursor_x + 1, ret});
+                        break;
+                    }
+                    if (nc.ncplane_at_cursor_cell(content_plane, &cell) == -1) {
+                        std.debug.print("Failed to get cursor cell\n", .{});
+                        break;
+                    }
+                    _ = nc.nccell_set_bg_rgb8(&cell, 0xC8, 0xC8, 0xC8);
+                    _ = nc.nccell_set_bg_alpha(&cell, nc.NCALPHA_OPAQUE);
+                    cursor_x += 1;
+                    if (nc.ncplane_putc_yx(
+                        content_plane,
+                        @intCast(cursor_y),
+                        @intCast(cursor_x),
+                        &cell,
+                    ) == -1) {
+                        std.debug.print("Failed to set cell at cursor pos: {d},{d}\n", .{cursor_x,cursor_y});
                     }
                 }
             }

@@ -125,3 +125,7 @@ pub fn fromFile(gpa: Allocator, file: std.fs.File) error{OutOfMemory,ParseZon}!?
         },
     );
 }
+
+pub fn deinit(_: @This(), _: Allocator) void {
+
+}

@@ -77,6 +77,11 @@ pub fn build(b: *std.Build) !void {
         .optimize = optimize,
     });
     mod.addImport("known-folders", known_folders.module("known-folders"));
+    const datetime = b.dependency("datetime", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    mod.addImport("datetime", datetime.module("datetime"));
     const exe = b.addExecutable(.{
         .name = "flow",
         .root_module = mod,

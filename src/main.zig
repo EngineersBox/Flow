@@ -36,16 +36,19 @@ pub fn main() !void {
     // Notcurses
     _ = std.c.setlocale(std.c.LC.ALL, "");
     var nc_opts: nc.notcurses_options = ncz.default_notcurses_options;
-    const ncs: *nc.notcurses = nc.notcurses_core_init(&nc_opts, null) orelse @panic("notcurses_core_init() failed");
+    const ncs: *nc.notcurses = nc.notcurses_core_init(&nc_opts, null) orelse @panic("notcurses_core_init() failed\n");
 
     // Application
-    const app: App = App.new(gpa, config, ncs) catch |err| {
+    var app: App = App.new(gpa, config, ncs) catch |err| {
         std.log.err("Failed to create application: {s}\n", .{ @errorName(err) });
-        return;
+        return err;
 };
-    defer app.deinit();
+    defer app.deinit() catch |err| {
+        std.log.err("Failed to deinit application: {s}\n", .{ @errorName(err) });
+    };
     app.init() catch |err| {
         std.log.err("Failed to initialise: {s}\n", .{ @errorName(err) });
+        return err;
 };
     app.run();
 
